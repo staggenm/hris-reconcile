@@ -7,6 +7,9 @@ technical interface or a common representation. It is designed for migration
 discovery, interface preparation, and transparent data-quality analysis across
 Core HR, payroll, local HRIS, and file-based datasets.
 
+Version 0.2 adds a guided local web workbench for analysts who should not need
+to edit YAML or use Python.
+
 The project is public, company-agnostic, and local-first. All included data is
 synthetic.
 
@@ -54,23 +57,20 @@ led to its typed status.
 ## Architecture
 
 ```text
-YAML contract ──> validation ───────────────┐
-                                            │
-CSV files ──> CSV adapter ──> domain records├─> identity resolver
-                                            │          │
-normalizer registry + semantic mappings ───┘          v
-                                              field comparator
-                                                      │
-                                      ┌───────────────┴──────────────┐
-                                      v                              v
-                              Rich summary                 JSON report model
+YAML CLI ──> file CSV adapter ──┐
+                                ├──> domain Dataset ──┐
+Web UI ──> uploaded CSV adapter ┘                    │
+                                                    ├──> reconciliation engine
+YAML or wizard ──> ReconciliationContract ──────────┘            │
+                                                                 v
+                                             console or mismatch-first reports
 ```
 
-The reconciliation core uses typed domain records and does not depend on pandas
-or openpyxl objects. The CSV adapter currently uses pandas, then converts its
-input into immutable dataset containers before the engine sees it. Adapters are
-provided to the engine through a protocol, leaving a narrow extension seam for
-future file formats.
+The reconciliation core accepts already-loaded typed domain records and does
+not depend on pandas, openpyxl, Streamlit, uploaded-file objects, or file paths.
+The CLI and UI separately convert their inputs into immutable dataset
+containers before invoking the same engine. This keeps a narrow extension seam
+for future file formats without creating a second comparison implementation.
 
 Important policies are fail-fast:
 
@@ -80,8 +80,9 @@ Important policies are fail-fast:
 - Required columns are checked before indexing records.
 - Null identities stop a run; duplicate identities receive explicit statuses.
 
-The implementation plan and the decisions behind these boundaries are recorded
-in [PLAN.md](PLAN.md).
+The initial implementation plan is recorded in [PLAN.md](PLAN.md). The v0.2
+boundary audit, suggestion formulas, privacy controls, and deferred decisions
+are recorded in [PLAN_V0_2.md](PLAN_V0_2.md).
 
 ## Installation
 
@@ -102,7 +103,51 @@ ruff check .
 mypy src
 ```
 
-## Quick start
+## Local web UI
+
+Start the private local workbench:
+
+```bash
+hris-reconcile-ui
+```
+
+Then open `http://127.0.0.1:8501` if the browser does not open automatically.
+The launcher forces Streamlit to bind only to `127.0.0.1`, runs headless, and
+disables usage-statistics gathering. The same controls are declared in
+`.streamlit/config.toml`.
+
+The guided workflow lets an analyst:
+
+1. upload and profile two UTF-8 CSV files using comma, semicolon, tab, or pipe
+   separators;
+2. review an explainable employee-identity suggestion and confirm it;
+3. confirm corresponding fields with exact comparison as the default;
+4. review observed value-pair frequencies before confirming semantic mappings;
+5. invoke the same deterministic engine used by the CLI; and
+6. explore mismatch-heavy fields, recurring raw-value pairs, and relevant
+   employee identities before downloading CSV or JSON results.
+
+Uploaded bytes are parsed directly in memory and are not intentionally written
+to disk. Use **Clear session / start over** to remove uploaded datasets,
+configuration, and reconciliation results from the active Streamlit session.
+
+To accept a representation difference such as `1` in one system and `0001` in
+the other, choose **Value mapping** for that field in step 3. In step 4, review
+the observed frequency and consistency, then select **Accept semantic mapping**
+for the pair. Identical raw values such as `1 ↔ 1` remain exact matches even on
+a field that also has semantic exceptions.
+
+For development, the equivalent command is:
+
+```bash
+streamlit run src/hris_reconcile/ui/app.py
+```
+
+Run that command from the repository root so `.streamlit/config.toml` is read.
+The packaged `hris-reconcile-ui` command is safer when running elsewhere because
+it repeats all privacy-related settings explicitly.
+
+## YAML CLI quick start
 
 Run the included synthetic example from the repository root:
 
@@ -194,39 +239,44 @@ serialization of engine internals.
 
 ## Privacy
 
-All processing and output remain on the local machine. The project sends no
-data anywhere and has no network-enabled runtime feature. The default console
-summary never prints identities, employee names, or source values. The detailed
-JSON report does contain configured field values and identities, so treat its
-chosen local output location according to the sensitivity of your real input
-data.
+All application processing and output remain on the local machine. The project
+makes no external API, analytics, enrichment, SaaS, telemetry, or AI calls. It
+loads no remote fonts, JavaScript, or other web assets. Streamlit serves the UI
+on the loopback address only and its usage statistics are disabled.
+
+The CLI summary and UI overview never print employee names or raw source values.
+The analyst-requested drill-downs and downloaded reports do contain identities
+and configured field values, so handle them according to the sensitivity of
+your real input data.
 
 The repository examples use invented names and identifiers only.
 
 ## Current limitations
 
-This first vertical slice supports two CSV files, one exact identity key, string
-fields, basic normalization, side-specific value mappings, console summaries,
-and JSON reports. It intentionally does not yet support:
+The CLI and local workbench support two CSV files, one exact identity key,
+string fields, basic normalization, side-specific value mappings, mismatch
+analysis, and local CSV/JSON reports. They intentionally do not yet support:
 
 - Excel input or reporting
 - composite identities
 - dates, effective dating, or historical records
 - numeric types and tolerances
 - fuzzy matching
-- databases, APIs, GUIs, or remote services
+- databases, APIs, authentication, multi-user hosting, or remote services
 
-CSV empty cells become explicit nulls. Identity fields receive no implicit
-normalization. If an identity is duplicated, that identity is reported and
-excluded from field comparison because any pairing would be arbitrary.
+CSV empty cells become explicit nulls, and separators are detected from comma,
+semicolon, tab, or pipe. Identity fields receive no implicit normalization. If
+an identity is duplicated, that identity is reported and excluded from field
+comparison because any pairing would be arbitrary.
 
 ## Roadmap
 
 Likely next steps are an Excel adapter using the existing dataset boundary,
 typed date and numeric comparison policies, composite structured identities,
-and configurable local report formats. Effective-dated reconciliation needs a
-separate, explicit temporal-selection policy before identity matching; it
-should not be hidden inside an input adapter.
+exportable wizard contracts, and configurable local report formats.
+Effective-dated reconciliation needs a separate, explicit temporal-selection
+policy before identity matching; it should not be hidden inside an input
+adapter.
 
 Before those additions, revisit memory use for large datasets and decide how
 composite identities appear in stable JSON. These concerns are deliberately not

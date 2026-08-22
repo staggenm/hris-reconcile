@@ -56,6 +56,14 @@ def test_mapped_match() -> None:
     assert result.mapping_name == "company"
 
 
+def test_identical_raw_values_remain_exact_when_mapping_mode_is_enabled() -> None:
+    result = compare("SAME", "SAME", mapped=True)
+
+    assert result.status is FieldComparisonStatus.MATCH_EXACT
+    assert result.left_canonical_value is None
+    assert result.right_canonical_value is None
+
+
 def test_mismatch() -> None:
     assert compare("Alpha", "Beta").status is FieldComparisonStatus.MISMATCH
 

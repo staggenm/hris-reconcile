@@ -1,14 +1,10 @@
-"""Orchestrate the deterministic reconciliation stages."""
-
-from collections.abc import Mapping
-from pathlib import Path
+"""Orchestrate deterministic reconciliation over loaded domain datasets."""
 
 from hris_reconcile.adapters.base import (
     Dataset,
-    DatasetAdapter,
     validate_required_columns,
 )
-from hris_reconcile.config.models import DatasetConfig, ReconciliationContract
+from hris_reconcile.config.models import ReconciliationContract
 from hris_reconcile.identity.models import IdentityStatus
 from hris_reconcile.identity.resolver import reconcile_identities
 from hris_reconcile.reconciliation.comparator import compare_field
@@ -30,22 +26,13 @@ def _statistics(dataset: Dataset) -> DatasetStatistics:
 
 
 class ReconciliationEngine:
-    def __init__(self, adapters: Mapping[str, DatasetAdapter]) -> None:
-        self._adapters = dict(adapters)
-
-    def _load(self, config: DatasetConfig, base_directory: Path) -> Dataset:
-        try:
-            adapter = self._adapters[config.type]
-        except KeyError as error:
-            message = f"no adapter registered for type {config.type!r}"
-            raise ValueError(message) from error
-        return adapter.load(config, base_directory=base_directory)
-
     def reconcile(
-        self, contract: ReconciliationContract, *, base_directory: Path
+        self,
+        *,
+        contract: ReconciliationContract,
+        left_dataset: Dataset,
+        right_dataset: Dataset,
     ) -> ReconciliationResult:
-        left_dataset = self._load(contract.left, base_directory)
-        right_dataset = self._load(contract.right, base_directory)
         left_columns, right_columns = _required_columns(contract)
         validate_required_columns(left_dataset, left_columns)
         validate_required_columns(right_dataset, right_columns)

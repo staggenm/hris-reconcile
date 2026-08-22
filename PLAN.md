@@ -86,12 +86,13 @@ the only intentionally minimal files.
    normalization. Null/empty identities fail dataset validation because they
    cannot be reconciled deterministically. Duplicate identities generate typed
    duplicate results and are not arbitrarily paired.
-5. **Comparison precedence.** Null states are decided first. With no mapping,
-   raw equality is `MATCH_EXACT`, normalized equality is `MATCH_NORMALIZED`, and
-   otherwise the result is `MISMATCH`. With a mapping, both sides must resolve;
-   an unmapped side gets its explicit status. Equal canonical values are
-   `MATCH_MAPPED` (even if raw representations happen to match), because the
-   mapping was the configured semantic comparison mechanism.
+5. **Comparison precedence.** Null states are decided first, followed by raw
+   equality as `MATCH_EXACT`. For differing representations, a configured
+   mapping must resolve both sides; an unmapped side gets its explicit status
+   and equal canonical values are `MATCH_MAPPED`. Without mapping, normalized
+   equality is `MATCH_NORMALIZED`, otherwise the result is `MISMATCH`. Exact
+   precedence lets mappings describe exceptions such as `1 ↔ 0001` without
+   forcing already-identical values through a comprehensive mapping table.
 6. **Mapping validity.** Canonical entries require non-empty `left` and `right`
    lists. A source value may map to only one canonical value per side. This is
    checked at contract validation time so resolution is deterministic.

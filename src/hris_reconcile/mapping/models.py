@@ -14,4 +14,3 @@ class MappingStatus(StrEnum):
 class MappingResolution:
     status: MappingStatus
     canonical_value: str | None
-

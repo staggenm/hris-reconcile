@@ -67,4 +67,3 @@ def render_console_summary(
         )
     )
     target.print(f"\nJSON report written to:\n{output}")
-

@@ -40,6 +40,15 @@ def test_valid_contract_loads(tmp_path: Path) -> None:
     assert contract.fields[0].normalize == ["trim", "casefold"]
 
 
+def test_dataset_source_type_and_path_must_be_provided_together(
+    tmp_path: Path,
+) -> None:
+    content = VALID_CONTRACT.replace("type: csv, path: left.csv", "type: csv")
+
+    with pytest.raises(ValidationError, match="provided together"):
+        load_contract(write_contract(tmp_path, content))
+
+
 def test_missing_identity_configuration_fails(tmp_path: Path) -> None:
     content = VALID_CONTRACT.replace(
         "identity: {left: person_id, right: employee_number}\n", ""
@@ -59,26 +68,27 @@ def test_unknown_normalization_function_fails(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "bad_mapping",
     [
-        "left: []\n      right: [\"1000\"]",
+        'left: []\n      right: ["1000"]',
         "left: [DE01]\n      right: []",
-        "left: DE01\n      right: [\"1000\"]",
+        'left: DE01\n      right: ["1000"]',
     ],
 )
 def test_malformed_value_mapping_fails(tmp_path: Path, bad_mapping: str) -> None:
-    content = VALID_CONTRACT.replace(
-        'left: [DE01]\n      right: ["1000"]', bad_mapping
-    )
+    content = VALID_CONTRACT.replace('left: [DE01]\n      right: ["1000"]', bad_mapping)
 
     with pytest.raises(ValidationError):
         load_contract(write_contract(tmp_path, content))
 
 
 def test_ambiguous_mapping_value_fails(tmp_path: Path) -> None:
-    content = VALID_CONTRACT + """
+    content = (
+        VALID_CONTRACT
+        + """
     CH_SWITZERLAND:
       left: [DE01]
       right: ["2000"]
 """
+    )
 
     with pytest.raises(ValidationError, match="DE01"):
         load_contract(write_contract(tmp_path, content))

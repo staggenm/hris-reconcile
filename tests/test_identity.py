@@ -71,4 +71,3 @@ def test_null_identity_fails() -> None:
             left_key="person_id",
             right_key="employee_number",
         )
-

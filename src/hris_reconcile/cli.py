@@ -32,8 +32,12 @@ def run(
 ) -> None:
     """Run a reconciliation contract using local files only."""
     contract = load_contract(contract_path)
-    result = ReconciliationEngine({"csv": CsvAdapter()}).reconcile(
-        contract, base_directory=contract_path.resolve().parent
+    adapter = CsvAdapter()
+    base_directory = contract_path.resolve().parent
+    result = ReconciliationEngine().reconcile(
+        contract=contract,
+        left_dataset=adapter.load(contract.left, base_directory=base_directory),
+        right_dataset=adapter.load(contract.right, base_directory=base_directory),
     )
     output_path = output or Path("output") / f"{contract.name}.json"
     write_json_report(contract, result, output_path)

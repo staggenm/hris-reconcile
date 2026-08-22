@@ -11,9 +11,7 @@ from hris_reconcile.reconciliation.models import (
 )
 
 
-def _normalized_mapping(
-    mapping: MappingConfig, field: FieldConfig
-) -> MappingConfig:
+def _normalized_mapping(mapping: MappingConfig, field: FieldConfig) -> MappingConfig:
     return {
         canonical: MappingValues(
             left=[normalize(value, field.normalize) for value in values.left],
@@ -50,6 +48,8 @@ def compare_field(
         status = FieldComparisonStatus.LEFT_NULL
     elif right_raw is None:
         status = FieldComparisonStatus.RIGHT_NULL
+    elif left_raw == right_raw:
+        status = FieldComparisonStatus.MATCH_EXACT
     elif field.value_mapping is not None:
         mapping = _normalized_mapping(value_mappings[field.value_mapping], field)
         resolver = MappingResolver(mapping)
@@ -65,8 +65,6 @@ def compare_field(
             status = FieldComparisonStatus.MATCH_MAPPED
         else:
             status = FieldComparisonStatus.MISMATCH
-    elif left_raw == right_raw:
-        status = FieldComparisonStatus.MATCH_EXACT
     elif left_normalized == right_normalized:
         status = FieldComparisonStatus.MATCH_NORMALIZED
     else:

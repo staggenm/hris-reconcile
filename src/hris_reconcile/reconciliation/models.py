@@ -45,4 +45,3 @@ class ReconciliationResult:
     right_dataset: DatasetStatistics
     identity_results: tuple[IdentityResult, ...]
     field_results: tuple[FieldComparisonResult, ...]
-

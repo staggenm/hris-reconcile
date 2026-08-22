@@ -26,4 +26,3 @@ def validate_required_columns(dataset: Dataset, required: set[str]) -> None:
     if missing:
         names = ", ".join(missing)
         raise ValueError(f"dataset {dataset.name!r} missing required columns: {names}")
-

@@ -21,4 +21,3 @@ def casefold(value: str) -> str:
 
 def collapse_whitespace(value: str) -> str:
     return re.sub(r"\s+", " ", value)
-

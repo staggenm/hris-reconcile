@@ -37,4 +37,3 @@ def normalize(
     for name in names:
         result = registry.resolve(name)(result)
     return result
-

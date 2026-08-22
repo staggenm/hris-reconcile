@@ -12,16 +12,17 @@ from hris_reconcile.reconciliation.engine import ReconciliationEngine
 from hris_reconcile.reconciliation.models import FieldComparisonStatus
 from hris_reconcile.reporting.json_report import write_json_report
 
-EXAMPLE_DIRECTORY = (
-    Path(__file__).parent.parent / "examples" / "core_hr_vs_payroll"
-)
+EXAMPLE_DIRECTORY = Path(__file__).parent.parent / "examples" / "core_hr_vs_payroll"
 CONTRACT_PATH = EXAMPLE_DIRECTORY / "contract.yaml"
 
 
 def example_result():
     contract = load_contract(CONTRACT_PATH)
-    result = ReconciliationEngine({"csv": CsvAdapter()}).reconcile(
-        contract, base_directory=EXAMPLE_DIRECTORY
+    adapter = CsvAdapter()
+    result = ReconciliationEngine().reconcile(
+        contract=contract,
+        left_dataset=adapter.load(contract.left, base_directory=EXAMPLE_DIRECTORY),
+        right_dataset=adapter.load(contract.right, base_directory=EXAMPLE_DIRECTORY),
     )
     return contract, result
 

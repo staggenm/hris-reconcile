@@ -57,4 +57,3 @@ def reconcile_identities(
                 )
             )
     return results
-

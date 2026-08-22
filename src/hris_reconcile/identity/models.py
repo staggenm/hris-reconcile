@@ -20,4 +20,3 @@ class IdentityResult:
     status: IdentityStatus
     left_record: Record | None = None
     right_record: Record | None = None
-

@@ -13,4 +13,3 @@ def load_contract(path: Path) -> ReconciliationContract:
     with path.open(encoding="utf-8") as stream:
         raw: Any = yaml.safe_load(stream)
     return ReconciliationContract.model_validate(raw)
-

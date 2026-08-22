@@ -23,8 +23,14 @@ class NormalizerName(StrEnum):
 
 class DatasetConfig(ContractModel):
     name: str = Field(min_length=1)
-    type: Literal["csv"]
-    path: Path
+    type: Literal["csv"] | None = None
+    path: Path | None = None
+
+    @model_validator(mode="after")
+    def validate_source_fields_are_paired(self) -> "DatasetConfig":
+        if (self.type is None) != (self.path is None):
+            raise ValueError("dataset type and path must be provided together")
+        return self
 
 
 class IdentityConfig(ContractModel):
@@ -78,4 +84,3 @@ class ReconciliationContract(ContractModel):
                             )
                         seen[value] = canonical
         return self
-
