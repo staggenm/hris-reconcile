@@ -7,8 +7,9 @@ technical interface or a common representation. It is designed for migration
 discovery, interface preparation, and transparent data-quality analysis across
 Core HR, payroll, local HRIS, and file-based datasets.
 
-Version 0.2 adds a guided local web workbench for analysts who should not need
-to edit YAML or use Python.
+Version 0.3 provides a guided local web workbench for analysts who should not
+need to edit YAML or use Python, with an auditable standard-library transport
+and no third-party web framework.
 
 The project is public, company-agnostic, and local-first. All included data is
 synthetic.
@@ -59,7 +60,7 @@ led to its typed status.
 ```text
 YAML CLI ──> file CSV adapter ──┐
                                 ├──> domain Dataset ──┐
-Web UI ──> uploaded CSV adapter ┘                    │
+Browser ──> guarded local API ──┘                    │
                                                     ├──> reconciliation engine
 YAML or wizard ──> ReconciliationContract ──────────┘            │
                                                                  v
@@ -67,10 +68,10 @@ YAML or wizard ──> ReconciliationContract ──────────┘ 
 ```
 
 The reconciliation core accepts already-loaded typed domain records and does
-not depend on pandas, openpyxl, Streamlit, uploaded-file objects, or file paths.
-The CLI and UI separately convert their inputs into immutable dataset
-containers before invoking the same engine. This keeps a narrow extension seam
-for future file formats without creating a second comparison implementation.
+not depend on the browser, uploaded-file objects, or file paths. The CLI and UI
+separately convert their inputs into immutable dataset containers before
+invoking the same engine. This keeps a narrow extension seam for future file
+formats without creating a second comparison implementation.
 
 Important policies are fail-fast:
 
@@ -80,9 +81,8 @@ Important policies are fail-fast:
 - Required columns are checked before indexing records.
 - Null identities stop a run; duplicate identities receive explicit statuses.
 
-The initial implementation plan is recorded in [PLAN.md](PLAN.md). The v0.2
-boundary audit, suggestion formulas, privacy controls, and deferred decisions
-are recorded in [PLAN_V0_2.md](PLAN_V0_2.md).
+The implementation plans are recorded in [PLAN.md](PLAN.md),
+[PLAN_V0_2.md](PLAN_V0_2.md), and [PLAN_V0_3.md](PLAN_V0_3.md).
 
 ## Installation
 
@@ -111,10 +111,12 @@ Start the private local workbench:
 hris-reconcile-ui
 ```
 
-Then open `http://127.0.0.1:8501` if the browser does not open automatically.
-The launcher forces Streamlit to bind only to `127.0.0.1`, runs headless, and
-disables usage-statistics gathering. The same controls are declared in
-`.streamlit/config.toml`.
+The launcher opens the browser automatically. It binds the standard-library
+server only to `127.0.0.1` on an OS-assigned ephemeral port. Use **Quit** in the
+workbench to clear the in-memory session and stop the process. Closing the
+browser tab requests the same cleanup immediately, with a 90-second heartbeat
+timeout as a fallback. When a browser cannot be opened automatically, packaged
+macOS and Windows builds show the local address in a native fallback dialog.
 
 The guided workflow lets an analyst:
 
@@ -127,25 +129,16 @@ The guided workflow lets an analyst:
 6. explore mismatch-heavy fields, recurring raw-value pairs, and relevant
    employee identities before downloading CSV or JSON results.
 
-Uploaded bytes are parsed directly in memory and are not intentionally written
-to disk. Use **Clear session / start over** to remove uploaded datasets,
-configuration, and reconciliation results from the active Streamlit session.
+Uploaded bytes are parsed directly in memory and are never written by the
+application. Use **Clear session / start over** to remove uploaded datasets,
+configuration, and reconciliation results from memory. Downloads are streamed
+to the browser; a file is created only when the analyst chooses to save it.
 
 To accept a representation difference such as `1` in one system and `0001` in
 the other, choose **Value mapping** for that field in step 3. In step 4, review
 the observed frequency and consistency, then select **Accept semantic mapping**
 for the pair. Identical raw values such as `1 ↔ 1` remain exact matches even on
 a field that also has semantic exceptions.
-
-For development, the equivalent command is:
-
-```bash
-streamlit run src/hris_reconcile/ui/app.py
-```
-
-Run that command from the repository root so `.streamlit/config.toml` is read.
-The packaged `hris-reconcile-ui` command is safer when running elsewhere because
-it repeats all privacy-related settings explicitly.
 
 ## YAML CLI quick start
 
@@ -237,12 +230,25 @@ statistics, complete identity and field-status summaries, and detailed decision
 records. It is shaped by a dedicated public report model rather than being a raw
 serialization of engine internals.
 
-## Privacy
+## Security and privacy
 
-All application processing and output remain on the local machine. The project
-makes no external API, analytics, enrichment, SaaS, telemetry, or AI calls. It
-loads no remote fonts, JavaScript, or other web assets. Streamlit serves the UI
-on the loopback address only and its usage statistics are disabled.
+All application processing and output remain on the local machine. The
+workbench uses only Python's standard-library HTTP server and local static
+assets. It makes no external API, analytics, enrichment, SaaS, telemetry, or AI
+calls and loads no remote fonts, scripts, styles, or images.
+
+The launcher generates a fresh 256-bit capability token for every process.
+Every API request must carry it in a custom header. Exact `Host` and `Origin`
+validation blocks DNS rebinding and cross-origin requests; no CORS responses
+are provided. The server listens only on IPv4 loopback at an ephemeral port. A
+process audit hook hard-aborts if code attempts a non-loopback connection.
+
+The token is delivered once in the initial URL and immediately removed from
+the address bar and browser history. Data, configuration, and results exist
+only in memory unless the analyst explicitly downloads a report. The browser
+sends a local heartbeat every five seconds; if it disappears for 90 seconds,
+the server clears the session and exits so payroll data does not remain in an
+orphaned background process.
 
 The CLI summary and UI overview never print employee names or raw source values.
 The analyst-requested drill-downs and downloaded reports do contain identities
@@ -250,6 +256,57 @@ and configured field values, so handle them according to the sensitivity of
 your real input data.
 
 The repository examples use invented names and identifiers only.
+
+### Build and sandbox verification
+
+Build the platform-specific windowed artifact from a fresh environment so
+packages installed for development cannot enter the bundle:
+
+```bash
+python3.12 -m venv .build-venv
+.build-venv/bin/pip install . 'pyinstaller>=6,<7'
+.build-venv/bin/pyinstaller --clean --noconfirm hris-reconcile-ui.spec
+```
+
+On macOS this creates `dist/HRIS Reconciliation.app`. On Windows, run
+`scripts\build_windows.ps1` in PowerShell to create the one-file, console-less
+`dist\HRIS-Reconciliation.exe`, then run
+`scripts\verify_windows_artifact.ps1`. PyInstaller does not cross-compile, so
+each artifact must be built on its target operating system. The macOS app is
+currently ad-hoc signed for local verification; distribution still requires a
+Developer ID signature and notarization.
+
+The Windows one-file executable extracts application runtime files to a private
+temporary `_MEI...` directory while running. It must run as a standard user,
+never as administrator. Uploaded datasets, configuration, and results remain
+memory-only. See [the Windows release procedure](docs/windows_release.md) for
+native security verification and Authenticode signing.
+
+Verify that it completes a full reconciliation while all non-loopback
+networking is denied by the operating system:
+
+- Linux: `unshare -n ./dist/hris-reconcile-ui` (configure loopback inside the
+  namespace if the distribution does not do so automatically).
+- macOS:
+  `sandbox-exec -p '(version 1) (allow default) (deny network-outbound)' 'dist/HRIS Reconciliation.app/Contents/MacOS/hris-reconcile-ui'`.
+  This profile also denies loopback outbound and works because the server is
+  inbound-only; it must be revised if the application ever initiates loopback
+  connections.
+- Windows: create an outbound-block firewall rule for
+  `dist\\hris-reconcile-ui.exe`, then run it and complete the wizard.
+
+The expected result for the bundled CSV example is 9 matched employees, one
+employee missing on each side, and the field totals shown below. This turns the
+no-external-network property into a repeatable verification rather than relying
+on dependency behavior.
+
+### Deferred decisions
+
+Version 0.3 deliberately keeps browser file inputs. Selected bytes travel from
+disk to browser memory and then through the guarded loopback socket to server
+memory. Native file dialogs are deferred to the v0.4 desktop shell, where they
+can be added without fragile main-thread coordination. Contract export/import
+is also deferred as the first v0.4 feature.
 
 ## Current limitations
 

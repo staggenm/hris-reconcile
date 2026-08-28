@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>HRIS Reconciliation</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar header">
+    <div>
+      <p class="eyebrow">Private local workbench</p>
+      <h1>HRIS Reconciliation</h1>
+      <p>Discover why two HR datasets disagree.</p>
+    </div>
+    <div class="actions">
+      <button id="clear-session" class="secondary">Clear session / start over</button>
+      <button id="quit-application" class="secondary danger">Quit</button>
+    </div>
+  </header>
+  <main>
+    <div class="notice banner banner-info" role="note">All processing stays on this computer. Uploaded data is held only in this application session.</div>
+    <div id="error" class="message error hidden" role="alert"></div>
+
+    <section id="step-upload" class="step" aria-labelledby="step-upload-title">
+      <div class="step-number">1</div>
+      <div class="step-body">
+        <h2 id="step-upload-title">Upload datasets</h2>
+        <p>Choose two CSV exports to compare. Only the first five rows are previewed.</p>
+        <div class="two-column">
+          <div id="left-card" class="dataset-card">
+            <h3>Dataset A</h3>
+            <label class="file-picker">Choose CSV<input id="left-file" type="file" accept=".csv,text/csv"></label>
+            <div id="left-dataset"></div>
+          </div>
+          <div id="right-card" class="dataset-card">
+            <h3>Dataset B</h3>
+            <label class="file-picker">Choose CSV<input id="right-file" type="file" accept=".csv,text/csv"></label>
+            <div id="right-dataset"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="step-identity" class="step hidden" aria-labelledby="step-identity-title">
+      <div class="step-number">2</div>
+      <div class="step-body">
+        <h2 id="step-identity-title">Match employees</h2>
+        <p>Which fields identify the same employee in both datasets?</p>
+        <div id="identity-suggestion" class="message"></div>
+        <div class="identity-grid">
+          <label>Dataset A identity<select id="left-identity"></select></label>
+          <span class="arrow">↔</span>
+          <label>Dataset B identity<select id="right-identity"></select></label>
+        </div>
+        <p id="identity-evidence" class="caption"></p>
+        <button id="confirm-identity">Confirm employee identity</button>
+        <span id="identity-confirmed" class="success hidden" role="status" aria-live="polite">Employee identity fields confirmed.</span>
+      </div>
+    </section>
+
+    <section id="step-fields" class="step hidden" aria-labelledby="step-fields-title">
+      <div class="step-number">3</div>
+      <div class="step-body">
+        <h2 id="step-fields-title">Match fields</h2>
+        <p>Suggestions are advisory. Exact comparison is the default.</p>
+        <div class="table-scroll"><table><thead><tr><th>Dataset A field</th><th>Dataset B field</th><th>Mode</th><th></th></tr></thead><tbody id="field-rows"></tbody></table></div>
+        <div class="actions"><button id="add-field" class="secondary">Add row</button><button id="confirm-fields">Confirm field mappings</button></div>
+        <span id="fields-confirmed" class="success hidden" role="status" aria-live="polite">Field mappings confirmed.</span>
+      </div>
+    </section>
+
+    <section id="step-mappings" class="step hidden" aria-labelledby="step-mappings-title">
+      <div class="step-number">4</div>
+      <div class="step-body">
+        <h2 id="step-mappings-title">Review value mappings</h2>
+        <p>Observed pairs are advisory. Accept only representation differences you confirm as semantically equivalent.</p>
+        <div id="mapping-editors"></div>
+        <button id="confirm-mappings">Confirm accepted semantic mappings</button>
+        <span id="mappings-confirmed" class="success hidden" role="status" aria-live="polite">Value mapping review complete.</span>
+      </div>
+    </section>
+
+    <section id="step-run" class="step hidden" aria-labelledby="step-run-title">
+      <div class="step-number">5</div>
+      <div class="step-body">
+        <h2 id="step-run-title">Run comparison</h2>
+        <label>Reconciliation name<input id="contract-name" type="text"></label>
+        <p id="run-summary" class="caption"></p>
+        <button id="run-reconciliation">Run reconciliation</button>
+      </div>
+    </section>
+
+    <section id="step-results" class="step hidden" aria-labelledby="step-results-title">
+      <div class="step-number">6</div>
+      <div class="step-body">
+        <h2 id="step-results-title">Explore discrepancies</h2>
+        <div id="metrics" class="metrics"></div>
+        <h3>Mismatch analysis by field</h3>
+        <div id="field-summary"></div>
+        <div id="pair-panel" class="hidden">
+          <label>Inspect mismatch patterns for field<select id="result-field"></select></label>
+          <div id="pair-summary"></div>
+          <label>Employee drill-down<select id="result-pair"></select></label>
+          <div id="detail-summary"></div>
+        </div>
+        <details class="finding"><summary>Optional matching comparison details</summary><div id="matching-summary" class="finding-body"></div></details>
+        <h3>Download local results</h3>
+        <div class="actions">
+          <button class="download secondary" data-file="full.csv">Full results CSV</button>
+          <button class="download secondary" data-file="mismatches.csv">Mismatches only CSV</button>
+          <button class="download secondary" data-file="report.json">JSON report</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

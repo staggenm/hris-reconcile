@@ -1,4 +1,4 @@
-"""In-memory CSV upload boundary, independent of Streamlit objects."""
+"""Framework-free in-memory CSV upload boundary."""
 
 from hris_reconcile.adapters.base import Dataset
 from hris_reconcile.adapters.csv_adapter import CsvParseError
