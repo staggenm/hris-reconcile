@@ -10,6 +10,8 @@ _installed = False
 _SOCKET_ADDRESS_EVENTS = frozenset(
     {"socket.connect", "socket.sendto", "socket.sendmsg"}
 )
+# AF_UNIX is only defined on platforms with Unix domain sockets (absent on Windows).
+_AF_UNIX = getattr(socket, "AF_UNIX", None)
 
 
 def _is_loopback_address(address: object) -> bool:
@@ -39,7 +41,11 @@ def _network_audit_hook(event: str, args: tuple[Any, ...]) -> None:
         return
     connection = args[0]
     address = args[1]
-    if isinstance(connection, socket.socket) and connection.family == socket.AF_UNIX:
+    if (
+        isinstance(connection, socket.socket)
+        and _AF_UNIX is not None
+        and connection.family == _AF_UNIX
+    ):
         return
     # A connected sendmsg may omit its destination; it opens no new channel.
     if event == "socket.sendmsg" and address is None:

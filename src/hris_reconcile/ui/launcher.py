@@ -39,7 +39,7 @@ def _show_launch_fallback(url: str) -> None:
     elif system == "Windows":
         import ctypes
 
-        ctypes.windll.user32.MessageBoxW(  # type: ignore[attr-defined]
+        ctypes.windll.user32.MessageBoxW(
             0,
             message,
             "HRIS Reconciliation",
@@ -65,7 +65,7 @@ def _show_startup_failure() -> None:
     elif system == "Windows":
         import ctypes
 
-        ctypes.windll.user32.MessageBoxW(  # type: ignore[attr-defined]
+        ctypes.windll.user32.MessageBoxW(
             0,
             _STARTUP_FAILURE_MESSAGE,
             "HRIS Reconciliation",

@@ -28,7 +28,7 @@ $LocationPushed = $false
 try {
     Push-Location $ProjectRoot
     $LocationPushed = $true
-    & py -3.12 -m venv $VirtualEnvironment
+    & python -m venv $VirtualEnvironment
     & $PythonExecutable -m pip install --upgrade pip
     & $PythonExecutable -m pip install $ProjectRoot "pyinstaller==6.22.2"
     & $PyInstallerExecutable --clean --noconfirm --distpath $DistPath `
