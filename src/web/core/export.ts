@@ -40,11 +40,21 @@ const FIELD_PUBLIC: Record<ReconciliationResult["fieldResults"][number]["status"
   unmapped_right: "UNMAPPED_RIGHT",
 };
 
-function escapeCsvCell(value: string | null | undefined): string {
+// Spreadsheet formula triggers (ASCII and full-width) at the start of a cell.
+const FORMULA_TRIGGER = /^[=+\-@\t\r\uFF1D\uFF0B\uFF0D\uFF20]/;
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
+// Neutralizes CSV formula injection by prefixing an apostrophe, which
+// spreadsheets treat as "text". Plain numbers such as -12 stay numeric.
+export function excelSafeCell(value: string): string {
+  return FORMULA_TRIGGER.test(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
+}
+
+function escapeCsvCell(value: string | null | undefined, excelSafe = false): string {
   if (value === null || value === undefined) {
     return "";
   }
-  const str = String(value);
+  const str = excelSafe ? excelSafeCell(String(value)) : String(value);
   if (
     str.includes(",") ||
     str.includes('"') ||
@@ -58,9 +68,11 @@ function escapeCsvCell(value: string | null | undefined): string {
 
 export function generateReconciliationCsv(
   result: ReconciliationResult,
-  options: { mismatchesOnly?: boolean } = {},
+  options: { mismatchesOnly?: boolean; excelSafe?: boolean } = {},
 ): string {
   const mismatchesOnly = options.mismatchesOnly ?? false;
+  const excelSafe = options.excelSafe ?? true;
+  const cell = (value: string | null | undefined) => escapeCsvCell(value, excelSafe);
   const lines: string[] = [];
 
   // Header line
@@ -72,7 +84,7 @@ export function generateReconciliationCsv(
     }
     const row = [
       "identity",
-      escapeCsvCell(identity.identity),
+      cell(identity.identity),
       "", // field_name
       "", // left_raw_value
       "", // right_raw_value
@@ -82,7 +94,7 @@ export function generateReconciliationCsv(
       "", // right_canonical_value
       "", // mapping_name
       "", // comparison_status
-      escapeCsvCell(IDENTITY_PUBLIC[identity.status]),
+      cell(IDENTITY_PUBLIC[identity.status]),
     ];
     lines.push(row.join(","));
   }
@@ -93,16 +105,16 @@ export function generateReconciliationCsv(
     }
     const row = [
       "field_comparison",
-      escapeCsvCell(field.identity),
-      escapeCsvCell(field.fieldName),
-      escapeCsvCell(field.leftRawValue),
-      escapeCsvCell(field.rightRawValue),
-      escapeCsvCell(field.leftNormalizedValue),
-      escapeCsvCell(field.rightNormalizedValue),
-      escapeCsvCell(field.leftCanonicalValue),
-      escapeCsvCell(field.rightCanonicalValue),
-      escapeCsvCell(field.mappingName),
-      escapeCsvCell(FIELD_PUBLIC[field.status]),
+      cell(field.identity),
+      cell(field.fieldName),
+      cell(field.leftRawValue),
+      cell(field.rightRawValue),
+      cell(field.leftNormalizedValue),
+      cell(field.rightNormalizedValue),
+      cell(field.leftCanonicalValue),
+      cell(field.rightCanonicalValue),
+      cell(field.mappingName),
+      cell(FIELD_PUBLIC[field.status]),
       "", // identity_status
     ];
     lines.push(row.join(","));

@@ -868,7 +868,8 @@ async function download(file: string): Promise<void> {
     return;
   }
 
-  const content = await queryWorker<string>("export", { format: file, resultId: state.result.resultId }, sessionGeneration);
+  const excelSafe = ($("#excel-safe") as HTMLInputElement).checked;
+  const content = await queryWorker<string>("export", { format: file, resultId: state.result.resultId, excelSafe }, sessionGeneration);
   const blob = new Blob([content], { type: mime });
   const anchor = document.createElement("a");
   anchor.href = URL.createObjectURL(blob);
@@ -910,6 +911,7 @@ function clearSession(): void {
   ($( "#result-field") as HTMLSelectElement).replaceChildren();
   ($( "#result-pair") as HTMLSelectElement).replaceChildren();
   for (const input of identityNormalizerInputs()) input.checked = false;
+  ($("#excel-safe") as HTMLInputElement).checked = true;
   ($("#left-file") as HTMLInputElement).value = "";
   ($("#right-file") as HTMLInputElement).value = "";
 

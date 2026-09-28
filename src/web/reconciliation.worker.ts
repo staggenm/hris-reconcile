@@ -40,6 +40,7 @@ interface ResultRequest extends BaseRequest {
   page?: number;
   pageSize?: number;
   format?: "full.csv" | "mismatches.csv" | "report.json";
+  excelSafe?: boolean;
   resultId?: number;
 }
 
@@ -120,7 +121,7 @@ self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
     if (request.type === "export") {
       if (!latestResult || !latestContract || !request.format) throw new Error("run reconciliation first");
       if (request.resultId !== latestResultId) throw new Error("results changed; run reconciliation again");
-      const content = request.format === "full.csv" ? generateReconciliationCsv(latestResult) : request.format === "mismatches.csv" ? generateReconciliationCsv(latestResult, { mismatchesOnly: true }) : generateReconciliationJson(latestContract, latestResult);
+      const content = request.format === "full.csv" ? generateReconciliationCsv(latestResult, { excelSafe: request.excelSafe ?? true }) : request.format === "mismatches.csv" ? generateReconciliationCsv(latestResult, { mismatchesOnly: true, excelSafe: request.excelSafe ?? true }) : generateReconciliationJson(latestContract, latestResult);
       self.postMessage({ type: "export-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: content });
       return;
     }

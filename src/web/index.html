@@ -6,18 +6,28 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; img-src data:; child-src 'none'; frame-src 'none';">
   <title>HRIS Reconciliation</title>
+  <!-- source-only-guard: removed from production builds by vite.config.ts -->
   <style>html.source-only body > *{display:none!important}html.source-only #source-notice{display:block!important;position:fixed;inset:0;background:#f5f7fb;color:#17243a;padding:3rem;font:16px/1.5 system-ui,sans-serif}html.source-only #source-notice h1{font-size:1.7rem}</style>
   <script>
-    if ("__HRIS_PRODUCTION__" !== "true" && location.protocol === "file:") {
+    if (location.protocol === "file:") {
       document.documentElement.classList.add("source-only");
       document.addEventListener("DOMContentLoaded", () => {
         const notice = document.createElement("main");
         notice.id = "source-notice";
-        notice.innerHTML = "<h1>Open the built workbench</h1><p>This source entry point needs the development server. Build the standalone application and open <strong>dist/hris-reconcile.html</strong>, or run <code>npm run dev</code>.</p>";
+        const heading = document.createElement("h1");
+        heading.textContent = "Open the built workbench";
+        const text = document.createElement("p");
+        const file = document.createElement("strong");
+        file.textContent = "dist/hris-reconcile.html";
+        const command = document.createElement("code");
+        command.textContent = "npm run dev";
+        text.append("This source entry point needs the development server. Build the standalone application and open ", file, ", or run ", command, ".");
+        notice.append(heading, text);
         document.body.append(notice);
       });
     }
   </script>
+  <!-- /source-only-guard -->
   <link rel="stylesheet" href="./app.css">
 </head>
 <body>
@@ -33,7 +43,7 @@
     </div>
   </header>
   <main>
-    <div class="notice banner banner-info" role="note">100% In-Browser &middot; All processing stays on this computer. Zero data egress.</div>
+    <div class="notice banner banner-info" role="note">Processing runs locally in this browser. The application makes no network requests.</div>
     <div id="error" class="message error hidden" role="alert"></div>
 
     <section id="step-upload" class="step" aria-labelledby="step-upload-title">
@@ -126,11 +136,13 @@
         </div>
         <details id="matching-details" class="finding"><summary>Optional matching comparison details</summary><div id="matching-summary" class="finding-body"></div></details>
         <h3>Download local results</h3>
+        <p class="caption export-note">Exports may contain sensitive HR data.</p>
         <div class="actions">
           <button class="download secondary" data-file="full.csv">Full results CSV</button>
           <button class="download secondary" data-file="mismatches.csv">Mismatches only CSV</button>
           <button class="download secondary" data-file="report.json">JSON report</button>
         </div>
+        <label class="inline-check"><input id="excel-safe" type="checkbox" checked>Neutralize spreadsheet formulas in CSV exports</label>
       </div>
     </section>
   </main>

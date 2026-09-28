@@ -269,3 +269,64 @@ test("N:1 mapping rows are accepted with their default canonical values", async 
   expect(await metric(page, "Field matches")).toBe("4");
   expect(await metric(page, "Field discrepancies")).toBe("0");
 });
+
+async function downloadText(page: import("@playwright/test").Page, button: string): Promise<string> {
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: button }).click();
+  return readFile((await (await downloadPromise).path())!, "utf8");
+}
+
+test("local-processing wording, sensitive-data note, and the excelSafe export toggle", async ({ page }) => {
+  await page.goto(artifact);
+  await expect(page.getByRole("note")).toHaveText("Processing runs locally in this browser. The application makes no network requests.");
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from("person_id,status\n001,=cmd|' /C calc'!A0\n002,-5\n") });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from("employee_number,status\n001,x\n002,-5\n") });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  await expect(page.locator("#step-results")).toContainText("Exports may contain sensitive HR data.");
+  const toggle = page.getByLabel("Neutralize spreadsheet formulas in CSV exports");
+  await expect(toggle).toBeChecked();
+  expect(await downloadText(page, "Mismatches only CSV")).toContain(",status,'=cmd|' /C calc'!A0,x,");
+  expect(await downloadText(page, "Full results CSV")).toContain("status,-5,-5,");
+  await toggle.uncheck();
+  expect(await downloadText(page, "Mismatches only CSV")).toContain(",status,=cmd|' /C calc'!A0,x,");
+  const report = JSON.parse(await downloadText(page, "JSON report"));
+  expect(report.details.field_comparisons[0].left_raw_value).toBe("=cmd|' /C calc'!A0");
+});
+
+test("hash-based CSP: full workflow has zero violations and unlisted inline script is blocked", async ({ page }) => {
+  const consoleCsp: string[] = [];
+  page.on("console", (message) => { if (/content.security.policy/i.test(message.text())) consoleCsp.push(message.text()); });
+  await page.addInitScript(() => {
+    const violations: string[] = [];
+    Object.defineProperty(window, "__cspViolations", { value: violations });
+    document.addEventListener("securitypolicyviolation", (event) => violations.push(`${event.violatedDirective} ${event.blockedURI}`));
+  });
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv + "003,Linus,CH01\n") });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightRichCsv + "003,Linus,9999\n") });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#field-rows select").nth(5).selectOption("Value mapping");
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  await expect(page.locator("#detail-summary")).toContainText("Employee details");
+  await page.locator("#matching-details summary").click();
+  await expect(page.locator("#matching-summary")).toContainText("Matching comparisons");
+  for (const button of ["Full results CSV", "Mismatches only CSV", "JSON report"]) await downloadText(page, button);
+  expect(await page.evaluate(() => (window as any).__cspViolations)).toEqual([]);
+  expect(consoleCsp).toEqual([]);
+
+  await page.evaluate(() => {
+    const script = document.createElement("script");
+    script.textContent = "window.__injected = true;";
+    document.body.append(script);
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).__cspViolations.length)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => (window as any).__cspViolations[0])).toMatch(/^script-src/);
+  expect(await page.evaluate(() => (window as any).__injected)).toBeUndefined();
+});

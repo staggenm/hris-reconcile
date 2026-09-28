@@ -422,6 +422,14 @@ button.danger:hover {
   font-weight: 600;
 }
 
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-weight: 500;
+}
+
 .identity-normalizers label {
   display: flex;
   align-items: center;

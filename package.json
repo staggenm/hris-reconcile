@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:browser": "npm run build && playwright test",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "verify": "node scripts/verify.mjs"
   },
   "dependencies": {
     "papaparse": "^5.5.2"

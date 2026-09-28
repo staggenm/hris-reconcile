@@ -54,7 +54,8 @@ describe("MISSING_IDENTITY", () => {
     const result = new ReconciliationEngine().reconcile({ contract, leftDataset: left, rightDataset: right });
     const csv = generateReconciliationCsv(result, { mismatchesOnly: true });
     expect(csv).toContain("identity,,,,,,,,,,,MISSING_IDENTITY_LEFT\n");
-    expect(csv).toContain("identity,\t,,,,,,,,,,MISSING_IDENTITY_RIGHT\n");
+    // excelSafe (default) neutralizes the leading TAB.
+    expect(csv).toContain("identity,'\t,,,,,,,,,,MISSING_IDENTITY_RIGHT\n");
     const report = JSON.parse(generateReconciliationJson(contract, result));
     expect(report.identity_summary).toMatchObject({ MISSING_IDENTITY_LEFT: 3, MISSING_IDENTITY_RIGHT: 1 });
     expect(report.details.identities[1]).toEqual({ identity: null, status: "MISSING_IDENTITY_LEFT" });

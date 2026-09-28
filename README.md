@@ -128,9 +128,17 @@ stripped.
 
 ```bash
 npm run typecheck
-npm test               # Vitest: engine, analysis, golden files, report schema
+npm test               # Vitest: engine, analysis, golden files, report schema, CSP build
 npm run test:browser   # builds, then Playwright on Chromium, Firefox, WebKit
+npm run verify         # the full CI pipeline (see below)
 ```
+
+`npm run verify` (also run by `.github/workflows/ci.yml`) runs typecheck,
+Vitest, build, a byte-compare of the build against the committed
+`dist/hris-reconcile.html`, and Playwright. It fails if any step changed the
+working tree. Run it after committing: the committed build must match the
+source. Tests never write to tracked files; review screenshots go to
+`test-results/`.
 
 Playwright browsers are a one-time development download:
 `npx playwright install chromium firefox webkit`. They are only for tests; the
@@ -153,10 +161,30 @@ records. Its shape is defined by `schemas/report.schema.json`.
 
 ## Security and privacy
 
-All processing happens in the browser tab. The application makes no network
-requests: the Content-Security-Policy sets `connect-src 'none'`, loads no
-remote fonts, scripts, styles, or images, and only allows the inlined worker
-through `worker-src blob:`. There is no telemetry, analytics, or AI.
+Processing runs locally in the browser tab, and the application makes no
+network requests. There is no telemetry, analytics, or AI.
+
+The built file carries a strict Content-Security-Policy:
+
+- `script-src` and `style-src` list only the SHA-256 hashes of the inlined
+  blocks, computed at build time (`vite.config.ts`), and there is no
+  `'unsafe-inline'`. Any other inline script is blocked.
+- `default-src`, `connect-src`, `base-uri`, and `form-action` are `'none'`.
+- `worker-src blob:` allows only the inlined worker. Vite's `?worker&inline`
+  wrapper contains a `data:` URL fallback for browsers without Blob URLs; that
+  fallback is inert under this policy.
+- The source-only notice script in `src/web/index.html` is stripped from
+  production builds.
+
+`tests_web/csp_build.test.ts` builds into a temporary directory and checks the
+hashes against the emitted blocks. A Playwright test checks for zero CSP
+violations in Chromium, Firefox, and WebKit.
+
+CSV exports neutralize spreadsheet formulas by default (**Neutralize
+spreadsheet formulas in CSV exports**, next to the download buttons): a value
+starting with `=`, `+`, `-`, `@`, TAB, CR, or their full-width forms gets a
+leading `'`. Plain numbers such as `-12` are left alone. The JSON report
+always contains raw values.
 
 Uploaded bytes are parsed in memory and never written by the application. Use
 **Clear session / start over** to discard datasets, configuration, and results.
