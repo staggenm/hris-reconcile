@@ -8,6 +8,7 @@ __pycache__/
 htmlcov/
 output/
 dist/*
+!dist/hris-reconcile.html
 !dist/HRIS-Reconciliation.exe
 build/
 *.egg-info/
