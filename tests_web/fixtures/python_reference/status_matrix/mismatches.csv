@@ -1,0 +1,16 @@
+record_type,identity,field_name,left_raw_value,right_raw_value,left_normalized_value,right_normalized_value,left_canonical_value,right_canonical_value,mapping_name,comparison_status,identity_status
+identity,10,,,,,,,,,,MISSING_LEFT
+identity,11,,,,,,,,,,MISSING_RIGHT
+identity,12,,,,,,,,,,DUPLICATE_LEFT
+identity,13,,,,,,,,,,DUPLICATE_RIGHT
+identity,14,,,,,,,,,,DUPLICATE_LEFT
+identity,14,,,,,,,,,,DUPLICATE_RIGHT
+field_comparison,4,text,"left,""quoted""
+line","right,""quoted""
+line","left,""quoted""
+line","right,""quoted""
+line",,,,MISMATCH,
+field_comparison,5,text,,present,,present,,,,LEFT_NULL,
+field_comparison,6,text,right,,right,,,,,RIGHT_NULL,
+field_comparison,8,mapped,unknown-left,R,unknown-left,R,,CANONICAL,codes,UNMAPPED_LEFT,
+field_comparison,9,mapped,L,unknown-right,L,unknown-right,CANONICAL,,codes,UNMAPPED_RIGHT,

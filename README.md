@@ -118,6 +118,23 @@ browser tab requests the same cleanup immediately, with a 90-second heartbeat
 timeout as a fallback. When a browser cannot be opened automatically, packaged
 macOS and Windows builds show the local address in a native fallback dialog.
 
+## Standalone browser workbench
+
+For the self-contained HTML version, build it with `npm run build` and open
+`dist/hris-reconcile.html` directly in the browser. That file includes its
+compiled application and styles and does not need the repository or a server
+beside it. `src/web/index.html` is a development source entry point; opening it
+directly shows a notice. To work on the web UI, run `npm run dev` and use the
+local address printed by Vite.
+
+Web verification uses `npm ci`, `npm run typecheck`, `npm test`,
+`npm run test:parity`, and `npm run test:browser`. The parity command uses the
+project's `.venv` Python 3.12 environment. Create it with the Python setup
+commands above before running that command. Playwright browsers are a one-time
+development download: `npx playwright install chromium firefox webkit`. The
+download is only for tests; the delivered HTML remains self-contained and
+offline.
+
 The guided workflow lets an analyst:
 
 1. upload and profile two UTF-8 CSV files using comma, semicolon, tab, or pipe

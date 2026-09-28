@@ -1,0 +1,48 @@
+{
+  "name": "status_matrix",
+  "left": {
+    "name": "left",
+    "type": null,
+    "path": null
+  },
+  "right": {
+    "name": "right",
+    "type": null,
+    "path": null
+  },
+  "identity": {
+    "left": "id",
+    "right": "id"
+  },
+  "fields": [
+    {
+      "name": "text",
+      "left": "text",
+      "right": "text",
+      "normalize": [
+        "trim",
+        "casefold"
+      ],
+      "value_mapping": null
+    },
+    {
+      "name": "mapped",
+      "left": "mapped",
+      "right": "mapped",
+      "normalize": [],
+      "value_mapping": "codes"
+    }
+  ],
+  "value_mappings": {
+    "codes": {
+      "CANONICAL": {
+        "left": [
+          "L"
+        ],
+        "right": [
+          "R"
+        ]
+      }
+    }
+  }
+}

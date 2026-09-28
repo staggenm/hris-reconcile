@@ -1,0 +1,28 @@
+{
+  "name": "hris-reconcile-web",
+  "version": "1.0.0",
+  "description": "Pure in-browser client-side HRIS reconciliation engine",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && cp dist/index.html dist/hris-reconcile.html",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --exclude tests_web/parity.test.ts",
+    "test:parity": "vitest run tests_web/parity.test.ts && .venv/bin/python scripts/generate_web_reference_fixtures.py --check && .venv/bin/python scripts/generate_web_unicode_data.py --check",
+    "test:browser": "npm run build && playwright test",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "papaparse": "^5.5.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "@types/papaparse": "^5.3.15",
+    "@playwright/test": "^1.63.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "vite-plugin-singlefile": "^2.1.0",
+    "vitest": "^3.0.7"
+  }
+}

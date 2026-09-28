@@ -1,0 +1,194 @@
+import { expect, test } from "@playwright/test";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const artifact = pathToFileURL(resolve(root, "dist/hris-reconcile.html")).href;
+const leftCsv = "person_id,first_name\n001,Ada\n002,Grace\n";
+const rightCsv = "employee_number,given_name\n001,Ada\n002,Grace\n";
+const leftRichCsv = "person_id,first_name,company\n001,Ada,DE01\n002,Grace,DE01\n";
+const rightRichCsv = "employee_number,given_name,company_code\n001,Ada,1000\n002,Grace,1000\n";
+
+test("standalone workflow, styled view, exports, and zero egress", async ({ page }) => {
+  const errors: string[] = [];
+  const egress: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error" && /content security policy/i.test(message.text())) errors.push(message.text()); });
+  page.on("request", (request) => { if (/^https?:|^wss?:/.test(request.url())) egress.push(request.url()); });
+  await page.addInitScript(() => {
+    const calls: string[] = [];
+    Object.defineProperty(window, "__egressCalls", { value: calls });
+    const fetchOriginal = window.fetch;
+    window.fetch = ((...args: Parameters<typeof fetch>) => { calls.push("fetch"); return fetchOriginal(...args); }) as typeof fetch;
+    const xhrOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method: string, url: string | URL, async = true, username?: string | null, password?: string | null) { calls.push("xhr"); Reflect.apply(xhrOpen, this, [method, url, async, username, password]); };
+    const ws = window.WebSocket;
+    window.WebSocket = new Proxy(ws, { construct(target, args) { calls.push("websocket"); return Reflect.construct(target, args); } });
+    navigator.sendBeacon = (() => { calls.push("beacon"); return false; }) as typeof navigator.sendBeacon;
+  });
+  await page.goto(artifact);
+  await expect(page.locator("#step-upload")).toBeVisible();
+  expect(await page.locator("header").evaluate((el) => getComputedStyle(el).display)).toBe("flex");
+  expect(await page.getByRole("button", { name: "Clear session / start over" }).evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftCsv) });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightCsv) });
+  await expect(page.locator("#step-identity")).toBeVisible();
+  await expect(page.locator("#step-fields")).toBeHidden();
+  await expect(page.locator("#step-mappings")).toBeHidden();
+  await page.locator("#confirm-identity").click();
+  await page.locator("#left-identity").selectOption("first_name");
+  await expect(page.locator("#step-identity")).toBeVisible();
+  await expect(page.locator("#step-fields")).toBeHidden();
+  await page.locator("#left-identity").selectOption("person_id");
+  await page.locator("#confirm-identity").click();
+  await page.locator("#field-rows select").nth(2).selectOption("Normalized text");
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  await expect(page.locator("#metrics")).toContainText("2");
+  for (const [button, file] of [["Full results CSV", "full.csv"], ["Mismatches only CSV", "mismatches.csv"], ["JSON report", "report.json"]] as const) {
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: button }).click();
+    const download = await downloadPromise;
+    const path = await download.path();
+    expect(path).not.toBeNull();
+    const text = await readFile(path!, "utf8");
+    if (file === "full.csv") expect(text).toContain("MATCHED");
+    if (file === "mismatches.csv") expect(text).toContain("record_type,identity,field_name");
+    if (file === "report.json") expect(JSON.parse(text).run_metadata.processing_mode).toBe("browser");
+  }
+  await page.locator("#clear-session").click();
+  await expect(page.locator("#step-results")).toBeHidden();
+  expect(await page.locator("#left-dataset").textContent()).toBe("");
+  expect(await page.locator("body").innerText()).not.toMatch(/Ada|Grace|001|002/);
+  expect(await page.locator("input").evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value))).toEqual(["", "", ""]);
+  expect(await page.evaluate(() => (window as any).__egressCalls)).toEqual([]);
+  expect(egress).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("source HTML explains how to open the styled build", async ({ page }) => {
+  await page.goto(pathToFileURL(resolve(root, "src/web/index.html")).href);
+  await expect(page.getByRole("heading", { name: "Open the built workbench" })).toBeVisible();
+  await expect(page.locator("#step-upload")).toBeHidden();
+});
+
+test("standalone layout fits a narrow viewport without page-wide overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(artifact);
+  const dimensions = await page.evaluate(() => ({ body: document.body.scrollWidth, viewport: document.documentElement.clientWidth }));
+  expect(dimensions.body).toBeLessThanOrEqual(dimensions.viewport);
+});
+
+test("copied artifact opens without repository files beside it", async ({ page }) => {
+  const directory = mkdtempSync(resolve(tmpdir(), "hris-standalone-copy-"));
+  const copy = resolve(directory, "workbench.html");
+  copyFileSync(resolve(root, "dist/hris-reconcile.html"), copy);
+  try {
+    await page.goto(pathToFileURL(copy).href);
+    await expect(page.locator("#step-upload")).toBeVisible();
+    expect(await page.locator("header").evaluate((el) => getComputedStyle(el).display)).toBe("flex");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("dropzone accepts a local CSV", async ({ page }) => {
+  await page.goto(artifact);
+  await page.locator("#left-card").evaluate((element, csv) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([csv], "left.csv", { type: "text/csv" }));
+    element.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  }, leftCsv);
+  await expect(page.locator("#left-dataset")).toContainText("2 rows");
+});
+
+test("Vite development entry stays styled and interactive", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+  await expect(page.locator("#step-upload")).toBeVisible();
+  expect(await page.locator("header").evaluate((el) => getComputedStyle(el).display)).toBe("flex");
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftCsv) });
+  await expect(page.locator("#left-dataset")).toContainText("2 rows");
+});
+
+test("changing a confirmed semantic mapping hides old results until rerun", async ({ page }) => {
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv) });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightRichCsv) });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#field-rows select").nth(5).selectOption("Value mapping");
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  await page.locator("#mapping-editors input[type=text]").nth(0).fill("NEW_CANONICAL");
+  await expect(page.locator("#step-results")).toBeHidden();
+  await expect(page.locator("#metrics")).toBeEmpty();
+  await expect(page.locator("#step-run")).toBeHidden();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+});
+
+test("main controls respond while a worker result is pending and reset discards it", async ({ page }) => {
+  await page.addInitScript(() => {
+    const add = Worker.prototype.addEventListener;
+    Worker.prototype.addEventListener = function (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) {
+      if (type === "message" && typeof listener === "function") {
+        const delayed = function (this: Worker, event: Event) {
+          window.setTimeout(() => listener.call(this, event), 700);
+        };
+        return add.call(this, type, delayed as EventListener, options);
+      }
+      return add.call(this, type, listener, options);
+    };
+  });
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftCsv) });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightCsv) });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeHidden();
+  await page.locator("#clear-session").click();
+  await expect(page.locator("#left-dataset")).toBeEmpty();
+  await page.waitForTimeout(800);
+  await expect(page.locator("#step-results")).toBeHidden();
+  await expect(page.locator("#metrics")).toBeEmpty();
+});
+
+test("capture synthetic desktop and narrow workflow screenshots", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "capture one set of cross-browser review images");
+  const output = resolve(root, "docs/reviews/html_conversion_screenshots");
+  mkdirSync(output, { recursive: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(artifact);
+  await page.waitForTimeout(300);
+  await page.locator("header").evaluate((header) => { (header as HTMLElement).style.position = "relative"; });
+  await page.screenshot({ path: resolve(output, "01-upload-desktop.png"), fullPage: true });
+  await page.locator("#left-file").setInputFiles({ name: "people.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv) });
+  await page.locator("#right-file").setInputFiles({ name: "payroll.csv", mimeType: "text/csv", buffer: Buffer.from(rightRichCsv) });
+  await expect(page.locator("#step-identity")).toBeVisible();
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: resolve(output, "02-profiles-desktop.png"), fullPage: true });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#field-rows select").nth(2).selectOption("Normalized text");
+  await page.locator("#field-rows select").nth(5).selectOption("Value mapping");
+  await page.locator("#confirm-fields").click();
+  await expect(page.locator("#mapping-editors input[type=text]").nth(1)).toHaveValue("DE01");
+  await page.screenshot({ path: resolve(output, "03-mappings-desktop.png"), fullPage: true });
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  await page.waitForTimeout(250);
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: resolve(output, "04-results-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: resolve(output, "05-results-narrow.png"), fullPage: true });
+});
