@@ -23,9 +23,10 @@ import {
 } from "./ui/mapping_editor";
 import { busyLabel } from "./ui/busy";
 import { metricTiles } from "./ui/metrics";
+import { canPrefillWizard, contractSummary, ContractSummary } from "./ui/contract_summary";
 import { pairOptions, selectedPair } from "./ui/drilldown";
 import { assertCsvFile } from "./ui/files";
-import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, invalidationNote, Progress, reach, STEP_IDS, StepId, stepStates } from "./ui/steps";
+import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, invalidationNote, Progress, reach, reachSkipping, STEP_IDS, StepId, stepStates } from "./ui/steps";
 import { onBusyChange, onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
 import {
   ComparisonMode,
@@ -702,11 +703,16 @@ function buildCurrentContract(): ReconciliationContract {
 
 async function runReconciliation(): Promise<void> {
   if (!state.left || !state.right || !state.identity) return;
-  invalidateResults();
+  const contract = buildCurrentContract();
   setProgress(reach("run"));
+  await runContract(contract, () => setProgress(confirmStep(progress, "run")));
+}
+
+// Runs a contract (from the wizard or an imported one) and shows its results.
+async function runContract(contract: ReconciliationContract, showResults: () => void): Promise<void> {
+  invalidateResults();
   const configGeneration = runGeneration;
   const currentSession = sessionGeneration;
-  const contract = buildCurrentContract();
   let dashboard: ReconciliationDashboard;
   try {
     dashboard = await reconcileInWorker({ contract, sessionGeneration: currentSession });
@@ -723,7 +729,7 @@ async function runReconciliation(): Promise<void> {
   renderFieldSummary(dashboard.fields);
   $("#matching-summary").replaceChildren(node("p", `${dashboard.matchingCount.toLocaleString()} matching comparisons. Expand to load details.`, "caption"));
 
-  setProgress(confirmStep(progress, "run"));
+  showResults();
   focusStep("results");
 }
 
@@ -766,6 +772,11 @@ async function loadContract(file: File): Promise<void> {
   }
   const contract = parseContractDocument(input);
   validateContractColumns(contract, state.left.columns, state.right.columns);
+  if (!canPrefillWizard(contract)) {
+    showContractSummary(contract, file.name);
+    return;
+  }
+  hideContractSummary();
   const wizard = wizardStateFromContract(contract);
 
   invalidateResults();
@@ -791,6 +802,56 @@ async function loadContract(file: File): Promise<void> {
 
   confirmMappings();
   ($("#contract-name") as HTMLInputElement).value = contract.name;
+}
+
+// A contract the wizard cannot represent (Custom normalizers) is shown
+// read-only and can be run as-is, skipping the wizard steps.
+function showContractSummary(contract: ReconciliationContract, fileName: string): void {
+  const summary = contractSummary(contract);
+  const panel = $("#contract-summary");
+  const title = node("h3", `Imported contract: ${summary.name}`);
+  const explanation = node("p", `${fileName} uses settings the wizard cannot edit (Custom normalizers). Review it, then run it as-is or discard it.`, "caption");
+  const identity = node("p", `Identity: ${summary.identity}`);
+  const table = renderTable(
+    [
+      { label: "Field", value: (row: ContractSummary["fields"][number]) => row.name },
+      { label: "Columns", value: (row) => row.columns },
+      { label: "Mode", value: (row) => row.mode },
+      { label: "Normalizers", value: (row) => row.normalizers },
+      { label: "Value mapping", value: (row) => row.mapping },
+    ],
+    summary.fields,
+    `Fields of contract ${summary.name}`,
+  );
+  const run = node("button", "Run this contract");
+  run.type = "button";
+  run.addEventListener("click", () => {
+    clearError();
+    runImportedContract(contract).catch(showError);
+  });
+  const discard = node("button", "Discard", "secondary");
+  discard.type = "button";
+  discard.addEventListener("click", () => {
+    hideContractSummary();
+    focusStep("identity");
+  });
+  const actions = node("div", "", "actions");
+  actions.append(run, discard);
+  panel.replaceChildren(title, explanation, identity, table, actions);
+  show("#contract-summary");
+}
+
+function hideContractSummary(): void {
+  $("#contract-summary").replaceChildren();
+  show("#contract-summary", false);
+}
+
+async function runImportedContract(contract: ReconciliationContract): Promise<void> {
+  if (!state.left || !state.right) throw new AppError("SESSION_STATE", "upload both datasets before running a contract");
+  state.left.name = contract.left.name;
+  state.right.name = contract.right.name;
+  setProgress(reach("identity"));
+  await runContract(contract, () => setProgress(reachSkipping("results", ["fields", "mappings", "run"])));
 }
 
 async function loadMatchingDetails(pageNumber: number): Promise<void> {
@@ -1012,6 +1073,7 @@ function clearSession(): void {
   ($("#right-file") as HTMLInputElement).value = "";
 
   invalidateAfterUpload();
+  hideContractSummary();
   setProgress(INITIAL_PROGRESS);
   clearError();
   window.scrollTo({ top: 0, behavior: "smooth" });

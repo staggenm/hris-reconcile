@@ -658,3 +658,32 @@ test("drill-down options carry the index in value, not in the label", async ({ p
   await expect(page.locator("#detail-summary tbody tr")).toHaveCount(1);
   await expect(page.locator("#detail-summary tbody")).toContainText("003");
 });
+
+test("a Custom contract shows a read-only summary, runs as-is, and matches the golden output", async ({ page }) => {
+  const golden = resolve(root, "tests_web/fixtures/golden/status_matrix");
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles(resolve(golden, "left.csv"));
+  await page.locator("#right-file").setInputFiles(resolve(golden, "right.csv"));
+  await expect(page.locator("#step-identity")).toHaveAttribute("data-state", "active");
+  await page.locator("#contract-file").setInputFiles(resolve(golden, "contract.json"));
+  const summary = page.locator("#contract-summary");
+  await expect(summary).toBeVisible();
+  await expect(page.locator("#error")).toBeHidden();
+  await expect(summary).toContainText("status_matrix");
+  await expect(summary).toContainText("id ↔ id (exact)");
+  const rows = await tableRows(page, "#contract-summary");
+  expect(rows[0]).toEqual(["Field", "Columns", "Mode", "Normalizers", "Value mapping"]);
+  expect(rows[1]).toEqual(["text", "text ↔ text", "Custom", "trim, casefold", "—"]);
+  expect(rows[2][4]).toBe("codes: 1 canonical value, 1 Dataset A value, 1 Dataset B value");
+
+  await page.getByRole("button", { name: "Discard" }).click();
+  await expect(summary).toBeHidden();
+  await expect(page.locator("#step-identity")).toHaveAttribute("data-state", "active");
+
+  await page.locator("#contract-file").setInputFiles(resolve(golden, "contract.json"));
+  await page.getByRole("button", { name: "Run this contract" }).click();
+  await expect(page.locator("#step-results")).toHaveAttribute("data-state", "active");
+  for (const step of ["fields", "mappings", "run"]) await expect(page.locator(`#step-${step}`)).toBeHidden();
+  expect(await downloadText(page, "Full results CSV")).toBe(await readFile(resolve(golden, "full.csv"), "utf8"));
+  expect(await downloadText(page, "Mismatches only CSV")).toBe(await readFile(resolve(golden, "mismatches.csv"), "utf8"));
+});

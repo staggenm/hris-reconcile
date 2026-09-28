@@ -17,6 +17,9 @@ export interface Invalidation {
 export interface Progress {
   reached: StepId;
   stale: Invalidation | null;
+  // Steps bypassed on the way to "reached" (running an imported contract
+  // skips the wizard steps); they stay hidden.
+  skipped?: readonly StepId[];
 }
 
 export const INITIAL_PROGRESS: Progress = { reached: "upload", stale: null };
@@ -32,7 +35,7 @@ export function stepStates(progress: Progress): Record<StepId, StepState> {
   const states = Object.create(null) as Record<StepId, StepState>;
   for (const step of STEP_IDS) {
     const at = index(step);
-    if (at > reached) states[step] = "hidden";
+    if (at > reached || progress.skipped?.includes(step)) states[step] = "hidden";
     else if (at < reached) states[step] = "done";
     else states[step] = progress.stale?.trigger === step ? "stale" : "active";
   }
@@ -41,6 +44,10 @@ export function stepStates(progress: Progress): Record<StepId, StepState> {
 
 export function reach(step: StepId): Progress {
   return { reached: step, stale: null };
+}
+
+export function reachSkipping(step: StepId, skipped: readonly StepId[]): Progress {
+  return { reached: step, stale: null, skipped };
 }
 
 // Confirming a step reveals the next one.
