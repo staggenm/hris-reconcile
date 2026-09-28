@@ -25,6 +25,8 @@ const IDENTITY_PUBLIC: Record<ReconciliationResult["identityResults"][number]["s
   missing_right: "MISSING_RIGHT",
   duplicate_left: "DUPLICATE_LEFT",
   duplicate_right: "DUPLICATE_RIGHT",
+  missing_identity_left: "MISSING_IDENTITY_LEFT",
+  missing_identity_right: "MISSING_IDENTITY_RIGHT",
 };
 const FIELD_PUBLIC: Record<ReconciliationResult["fieldResults"][number]["status"], string> = {
   match_exact: "MATCH_EXACT",
@@ -123,7 +125,7 @@ export interface JsonReport {
   identity_summary: Record<string, number>;
   field_comparison_summary: Record<string, number>;
   details: {
-    identities: Array<{ identity: string; status: string }>;
+    identities: Array<{ identity: string | null; status: string }>;
     field_comparisons: Array<{
       identity: string;
       field_name: string;
@@ -149,6 +151,8 @@ export function generateReconciliationJson(
     MISSING_RIGHT: 0,
     DUPLICATE_LEFT: 0,
     DUPLICATE_RIGHT: 0,
+    MISSING_IDENTITY_LEFT: 0,
+    MISSING_IDENTITY_RIGHT: 0,
   };
   for (const id of result.identityResults) {
     identitySummary[IDENTITY_PUBLIC[id.status]]++;

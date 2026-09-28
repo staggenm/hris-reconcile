@@ -5,7 +5,7 @@
 type Schema = Record<string, any>;
 
 const ANNOTATIONS = new Set(["$schema", "$id", "$defs", "title", "description"]);
-const ASSERTIONS = new Set(["$ref", "type", "properties", "required", "additionalProperties", "items", "enum", "const", "minimum"]);
+const ASSERTIONS = new Set(["$ref", "anyOf", "type", "properties", "required", "additionalProperties", "items", "enum", "const", "minimum"]);
 
 function typeOf(value: unknown): string {
   if (value === null) return "null";
@@ -31,14 +31,23 @@ function resolveRef(root: Schema, ref: string): Schema {
 }
 
 export function validateJsonSchema(schema: Schema, value: unknown): string[] {
-  const errors: string[] = [];
-  const visit = (node: Schema, data: unknown, pointer: string): void => {
+  const visit = (node: Schema, data: unknown, pointer: string, errors: string[]): void => {
     for (const keyword of Object.keys(node)) {
       if (!ANNOTATIONS.has(keyword) && !ASSERTIONS.has(keyword)) {
         throw new Error(`unsupported schema keyword '${keyword}'`);
       }
     }
-    if (node.$ref !== undefined) visit(resolveRef(schema, node.$ref), data, pointer);
+    if (node.$ref !== undefined) visit(resolveRef(schema, node.$ref), data, pointer, errors);
+    if (node.anyOf !== undefined) {
+      const branches = (node.anyOf as Schema[]).map((branch) => {
+        const branchErrors: string[] = [];
+        visit(branch, data, pointer, branchErrors);
+        return branchErrors;
+      });
+      if (branches.every((branchErrors) => branchErrors.length > 0)) {
+        errors.push(`${pointer}: matches no anyOf branch [${branches.map((e) => e.join("; ")).join(" | ")}]`);
+      }
+    }
     if (node.type !== undefined) {
       const types: string[] = Array.isArray(node.type) ? node.type : [node.type];
       if (!types.some((type) => matchesType(data, type))) {
@@ -66,18 +75,19 @@ export function validateJsonSchema(schema: Schema, value: unknown): string[] {
       for (const [key, child] of Object.entries(object)) {
         const childPointer = `${pointer}/${escapePointer(key)}`;
         if (Object.prototype.hasOwnProperty.call(properties, key)) {
-          visit(properties[key], child, childPointer);
+          visit(properties[key], child, childPointer, errors);
         } else if (node.additionalProperties === false) {
           errors.push(`${childPointer}: additional property`);
         } else if (typeof node.additionalProperties === "object") {
-          visit(node.additionalProperties, child, childPointer);
+          visit(node.additionalProperties, child, childPointer, errors);
         }
       }
     }
     if (typeOf(data) === "array" && node.items !== undefined) {
-      (data as unknown[]).forEach((item, index) => visit(node.items, item, `${pointer}/${index}`));
+      (data as unknown[]).forEach((item, index) => visit(node.items, item, `${pointer}/${index}`, errors));
     }
   };
-  visit(schema, value, "");
+  const errors: string[] = [];
+  visit(schema, value, "", errors);
   return errors;
 }

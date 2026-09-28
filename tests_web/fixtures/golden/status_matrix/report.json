@@ -8,12 +8,12 @@
   "datasets": {
     "left": {
       "name": "left",
-      "record_count": 15,
+      "record_count": 17,
       "column_count": 3
     },
     "right": {
       "name": "right",
-      "record_count": 15,
+      "record_count": 16,
       "column_count": 3
     }
   },
@@ -22,7 +22,9 @@
     "MISSING_LEFT": 1,
     "MISSING_RIGHT": 1,
     "DUPLICATE_LEFT": 2,
-    "DUPLICATE_RIGHT": 2
+    "DUPLICATE_RIGHT": 2,
+    "MISSING_IDENTITY_LEFT": 2,
+    "MISSING_IDENTITY_RIGHT": 1
   },
   "field_comparison_summary": {
     "MATCH_EXACT": 10,
@@ -96,6 +98,18 @@
       {
         "identity": "9",
         "status": "MATCHED"
+      },
+      {
+        "identity": null,
+        "status": "MISSING_IDENTITY_LEFT"
+      },
+      {
+        "identity": "  ",
+        "status": "MISSING_IDENTITY_LEFT"
+      },
+      {
+        "identity": null,
+        "status": "MISSING_IDENTITY_RIGHT"
       }
     ],
     "field_comparisons": [

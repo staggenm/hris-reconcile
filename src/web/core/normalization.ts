@@ -1,15 +1,24 @@
 import { NormalizerName } from "./types";
-import { CASEFOLD_TABLE, PYTHON_WHITESPACE_CODEPOINTS } from "./unicode_casefold";
+import { CASEFOLD_TABLE, WHITESPACE_CODEPOINTS } from "./unicode_casefold";
 
 export type Normalizer = (value: string) => string;
+
+export function nfc(value: string): string {
+  return value.normalize("NFC");
+}
 
 export function trim(value: string): string {
   const chars = Array.from(value);
   let start = 0;
   let end = chars.length;
-  while (start < end && PYTHON_WHITESPACE.has(chars[start])) start++;
-  while (end > start && PYTHON_WHITESPACE.has(chars[end - 1])) end--;
+  while (start < end && WHITESPACE.has(chars[start])) start++;
+  while (end > start && WHITESPACE.has(chars[end - 1])) end--;
   return chars.slice(start, end).join("");
+}
+
+// Removes leading "0" characters but never empties the value: "000" -> "0".
+export function stripLeadingZeros(value: string): string {
+  return value.replace(/^0+(?=.)/su, "");
 }
 
 export function uppercase(value: string): string {
@@ -22,23 +31,24 @@ export function lowercase(value: string): string {
 
 export function casefold(value: string): string {
   let result = "";
-  for (const character of value) result += CASEFOLD_TABLE[character] ?? character;
+  for (const character of value) result += CASEFOLD.get(character) ?? character;
   return result;
 }
 
 export function collapseWhitespace(value: string): string {
-  return replacePythonWhitespace(value, " ").replace(/ +/g, " ");
+  return replaceWhitespace(value, " ").replace(/ +/g, " ");
 }
 
-// Whitespace set equal to Python 3.12 str.isspace() (Unicode 15.0.0), pinned in
-// unicode_casefold.ts.
-const PYTHON_WHITESPACE = new Set(
-  PYTHON_WHITESPACE_CODEPOINTS.map((codepoint) => String.fromCodePoint(codepoint)),
+const CASEFOLD = new Map(Object.entries(CASEFOLD_TABLE));
+
+// Whitespace set pinned in unicode_casefold.ts (origin documented there).
+const WHITESPACE = new Set(
+  WHITESPACE_CODEPOINTS.map((codepoint) => String.fromCodePoint(codepoint)),
 );
 
-function replacePythonWhitespace(value: string, replacement: string): string {
+function replaceWhitespace(value: string, replacement: string): string {
   let out = "";
-  for (const char of value) out += PYTHON_WHITESPACE.has(char) ? replacement : char;
+  for (const char of value) out += WHITESPACE.has(char) ? replacement : char;
   return out;
 }
 
@@ -59,11 +69,13 @@ export class NormalizerRegistry {
 }
 
 export const NORMALIZERS = new NormalizerRegistry({
+  nfc,
   trim,
   uppercase,
   lowercase,
   casefold,
   collapse_whitespace: collapseWhitespace,
+  strip_leading_zeros: stripLeadingZeros,
 });
 
 export function normalize(

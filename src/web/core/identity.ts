@@ -1,34 +1,61 @@
-import { Dataset, IdentityResult, RecordRow } from "./types";
+import { normalize, trim } from "./normalization";
+import { compareCodePoints } from "./compare";
+import { Dataset, IDENTITY_NORMALIZERS, IdentityNormalizerName, IdentityResult, RecordRow } from "./types";
 
-function indexRecords(dataset: Dataset, key: string): Map<string, RecordRow[]> {
+export function validateIdentityNormalizers(names: readonly string[]): void {
+  for (const name of names) {
+    if (!(IDENTITY_NORMALIZERS as readonly string[]).includes(name)) {
+      throw new Error(`unsupported identity normalizer '${name}'`);
+    }
+  }
+}
+
+// Null or all-whitespace identities cannot be keyed; they are reported per
+// record as MISSING_IDENTITY instead of aborting the run.
+function isMissingIdentity(value: string | null | undefined): boolean {
+  return value === null || value === undefined || trim(value) === "";
+}
+
+// Records are keyed by the normalized identity, so duplicates are detected
+// after normalization.
+function indexRecords(
+  dataset: Dataset,
+  key: string,
+  normalizers: readonly IdentityNormalizerName[],
+): { index: Map<string, RecordRow[]>; missing: RecordRow[] } {
   const index = new Map<string, RecordRow[]>();
+  const missing: RecordRow[] = [];
   for (const record of dataset.records) {
     const identity = record[key];
-    if (identity === null || identity === undefined || identity === "") {
-      throw new Error(`dataset '${dataset.name}' contains a null identity`);
+    if (isMissingIdentity(identity)) {
+      missing.push(record);
+      continue;
     }
-    const list = index.get(identity);
+    const normalized = normalize(identity!, normalizers);
+    const list = index.get(normalized);
     if (list) {
       list.push(record);
     } else {
-      index.set(identity, [record]);
+      index.set(normalized, [record]);
     }
   }
-  return index;
+  return { index, missing };
 }
 
 export function reconcileIdentities(
   left: Dataset,
   right: Dataset,
-  options: { leftKey: string; rightKey: string },
+  options: { leftKey: string; rightKey: string; normalize?: readonly IdentityNormalizerName[] },
 ): IdentityResult[] {
-  const leftIndex = indexRecords(left, options.leftKey);
-  const rightIndex = indexRecords(right, options.rightKey);
+  const normalizers = options.normalize ?? [];
+  validateIdentityNormalizers(normalizers);
+  const { index: leftIndex, missing: leftMissing } = indexRecords(left, options.leftKey, normalizers);
+  const { index: rightIndex, missing: rightMissing } = indexRecords(right, options.rightKey, normalizers);
   const results: IdentityResult[] = [];
 
   const allIdentities = Array.from(
     new Set([...leftIndex.keys(), ...rightIndex.keys()]),
-  ).sort();
+  ).sort(compareCodePoints);
 
   for (const identity of allIdentities) {
     const leftRecords = leftIndex.get(identity) || [];
@@ -67,6 +94,13 @@ export function reconcileIdentities(
         rightRecord: rightRecords[0],
       });
     }
+  }
+
+  for (const record of leftMissing) {
+    results.push({ identity: record[options.leftKey] ?? null, status: "missing_identity_left", leftRecord: record });
+  }
+  for (const record of rightMissing) {
+    results.push({ identity: record[options.rightKey] ?? null, status: "missing_identity_right", rightRecord: record });
   }
 
   return results;

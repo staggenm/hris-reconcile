@@ -1,5 +1,6 @@
-import { Dataset } from "../core/types";
+import { Dataset, IdentityNormalizerName } from "../core/types";
 import { reconcileIdentities } from "../core/identity";
+import { compareNullableCodePoints } from "../core/compare";
 
 export interface ObservedPair {
   left_value: string | null;
@@ -8,11 +9,6 @@ export interface ObservedPair {
   matched_percentage: number;
   consistency_percentage: number;
   suggested: boolean;
-  left_display?: string;
-  right_display?: string;
-  assessment?: string;
-  canonical_value?: string;
-  accepted?: boolean;
 }
 
 export function analyzeObservedPairs(
@@ -23,11 +19,13 @@ export function analyzeObservedPairs(
     right_identity: string;
     left_field: string;
     right_field: string;
+    identity_normalize?: IdentityNormalizerName[];
   },
 ): ObservedPair[] {
   const identities = reconcileIdentities(left, right, {
     leftKey: options.left_identity,
     rightKey: options.right_identity,
+    normalize: options.identity_normalize,
   });
 
   const pairs: [string | null, string | null][] = [];
@@ -48,7 +46,7 @@ export function analyzeObservedPairs(
   const rightCounts = new Map<string | null, number>();
 
   for (const [l, r] of pairs) {
-    const key = `${l ?? "<null>"}|||${r ?? "<null>"}`;
+    const key = JSON.stringify([l, r]);
     const existing = pairCounts.get(key);
     if (existing) {
       existing.count++;
@@ -89,12 +87,10 @@ export function analyzeObservedPairs(
 
   evidence.sort((a, b) => {
     if (b.count !== a.count) return b.count - a.count;
-    const aLeft = a.left_value || "";
-    const bLeft = b.left_value || "";
-    if (aLeft !== bLeft) return aLeft.localeCompare(bLeft);
-    const aRight = a.right_value || "";
-    const bRight = b.right_value || "";
-    return aRight.localeCompare(bRight);
+    return (
+      compareNullableCodePoints(a.left_value, b.left_value) ||
+      compareNullableCodePoints(a.right_value, b.right_value)
+    );
   });
 
   return evidence;

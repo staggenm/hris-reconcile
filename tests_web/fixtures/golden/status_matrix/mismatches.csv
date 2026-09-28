@@ -5,6 +5,9 @@ identity,12,,,,,,,,,,DUPLICATE_LEFT
 identity,13,,,,,,,,,,DUPLICATE_RIGHT
 identity,14,,,,,,,,,,DUPLICATE_LEFT
 identity,14,,,,,,,,,,DUPLICATE_RIGHT
+identity,,,,,,,,,,,MISSING_IDENTITY_LEFT
+identity,  ,,,,,,,,,,MISSING_IDENTITY_LEFT
+identity,,,,,,,,,,,MISSING_IDENTITY_RIGHT
 field_comparison,4,text,"left,""quoted""
 line","right,""quoted""
 line","left,""quoted""

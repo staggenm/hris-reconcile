@@ -1,4 +1,5 @@
 import { compareFieldWithResolver } from "./comparator";
+import { compareCodePoints } from "./compare";
 import { MappingResolver, normalizedResolver } from "./mapping";
 import { reconcileIdentities } from "./identity";
 import {
@@ -13,7 +14,7 @@ function validateRequiredColumns(dataset: Dataset, required: Set<string>): void 
   const missing = Array.from(required).filter((col) => !dataset.columns.includes(col));
   if (missing.length > 0) {
     throw new Error(
-      `dataset '${dataset.name}' missing required columns: ${missing.sort().join(", ")}`,
+      `dataset '${dataset.name}' missing required columns: ${missing.sort(compareCodePoints).join(", ")}`,
     );
   }
 }
@@ -60,6 +61,7 @@ export class ReconciliationEngine {
     const identityResults = reconcileIdentities(leftDataset, rightDataset, {
       leftKey: contract.identity.left,
       rightKey: contract.identity.right,
+      normalize: contract.identity.normalize,
     });
 
     const fieldResults: FieldComparisonResult[] = [];
@@ -68,7 +70,7 @@ export class ReconciliationEngine {
       if (identityResult.status !== "matched") {
         continue;
       }
-      if (!identityResult.leftRecord || !identityResult.rightRecord) {
+      if (identityResult.identity === null || !identityResult.leftRecord || !identityResult.rightRecord) {
         throw new Error("matched identity must contain both records");
       }
 

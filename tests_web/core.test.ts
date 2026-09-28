@@ -65,7 +65,7 @@ describe("Identity Resolution", () => {
     );
     const map: Record<string, string> = {};
     for (const r of results) {
-      map[r.identity] = r.status;
+      map[String(r.identity)] = r.status;
     }
     return map;
   }
@@ -101,16 +101,6 @@ describe("Identity Resolution", () => {
       { leftKey: "person_id", rightKey: "employee_number" },
     );
     expect(results.map((r) => r.status)).toEqual(["duplicate_left", "duplicate_right"]);
-  });
-
-  it("throws on null identity", () => {
-    expect(() =>
-      reconcileIdentities(
-        makeDataset("left", "person_id", [null]),
-        makeDataset("right", "employee_number", []),
-        { leftKey: "person_id", rightKey: "employee_number" },
-      ),
-    ).toThrow(/null identity/);
   });
 });
 

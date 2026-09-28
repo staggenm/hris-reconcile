@@ -36,7 +36,9 @@
         "MISSING_LEFT": { "$ref": "#/$defs/count" },
         "MISSING_RIGHT": { "$ref": "#/$defs/count" },
         "DUPLICATE_LEFT": { "$ref": "#/$defs/count" },
-        "DUPLICATE_RIGHT": { "$ref": "#/$defs/count" }
+        "DUPLICATE_RIGHT": { "$ref": "#/$defs/count" },
+        "MISSING_IDENTITY_LEFT": { "$ref": "#/$defs/count" },
+        "MISSING_IDENTITY_RIGHT": { "$ref": "#/$defs/count" }
       }
     },
     "field_comparison_summary": {
@@ -63,13 +65,10 @@
         "identities": {
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["identity", "status"],
-            "properties": {
-              "identity": { "type": "string" },
-              "status": { "$ref": "#/$defs/identity_status" }
-            }
+            "anyOf": [
+              { "$ref": "#/$defs/keyed_identity" },
+              { "$ref": "#/$defs/missing_identity" }
+            ]
           }
         },
         "field_comparisons": {
@@ -114,8 +113,24 @@
         "column_count": { "$ref": "#/$defs/count" }
       }
     },
-    "identity_status": {
-      "enum": ["MATCHED", "MISSING_LEFT", "MISSING_RIGHT", "DUPLICATE_LEFT", "DUPLICATE_RIGHT"]
+    "keyed_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "status"],
+      "properties": {
+        "identity": { "type": "string" },
+        "status": { "enum": ["MATCHED", "MISSING_LEFT", "MISSING_RIGHT", "DUPLICATE_LEFT", "DUPLICATE_RIGHT"] }
+      }
+    },
+    "missing_identity": {
+      "description": "A record whose identity is null or all whitespace; identity holds the raw value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "status"],
+      "properties": {
+        "identity": { "$ref": "#/$defs/nullable_string" },
+        "status": { "enum": ["MISSING_IDENTITY_LEFT", "MISSING_IDENTITY_RIGHT"] }
+      }
     },
     "field_status": {
       "enum": ["MATCH_EXACT", "MATCH_NORMALIZED", "MATCH_MAPPED", "BOTH_NULL", "LEFT_NULL", "RIGHT_NULL", "UNMAPPED_LEFT", "UNMAPPED_RIGHT", "MISMATCH"]

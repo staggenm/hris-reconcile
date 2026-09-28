@@ -74,9 +74,14 @@ wizard (main thread) ──> ReconciliationContract ────┘
 Important policies are fail-fast:
 
 - Unknown normalizer names and missing mapping references are invalid.
-- Empty or ambiguous semantic mappings are invalid.
+- Empty or ambiguous semantic mappings are invalid. Mapping rows that share a
+  canonical value are grouped (N:1 and 1:N); only an alias that resolves to two
+  different canonical values is ambiguous.
 - Required columns are checked before indexing records.
-- Null identities stop a run; duplicate identities receive explicit statuses.
+- Null or all-whitespace identities are reported per record as
+  `MISSING_IDENTITY_LEFT` / `MISSING_IDENTITY_RIGHT`; duplicate identities
+  receive explicit statuses.
+- Output order uses Unicode code-point order, never the browser locale.
 
 ## Usage
 
@@ -109,8 +114,15 @@ a field that also has semantic exceptions.
 
 Synthetic sample inputs are in `examples/core_hr_vs_payroll/`.
 
-Available comparison modes are **Exact**, **Normalized text** (trim, collapse
-whitespace, casefold), **Value mapping**, and **Ignore**.
+Available comparison modes are **Exact** (byte-exact), **Normalized text**
+(Unicode NFC, trim, collapse whitespace, casefold), **Value mapping**, and
+**Ignore**.
+
+Identity matching is exact by default. Step 2 offers opt-in identity
+normalization (trim, strip leading zeros, ignore case), applied to both sides and
+recorded in the contract. Duplicate detection runs on the normalized key, so
+`00012345` and `12345` in one dataset become a duplicate when leading zeros are
+stripped.
 
 ## Verification
 

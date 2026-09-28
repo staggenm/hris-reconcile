@@ -197,7 +197,7 @@ describe("Observed Pair Analysis", () => {
 });
 
 describe("Contract Builder & Results Analysis & Exports", () => {
-  it("accepts prototype-like canonical names and rejects repeated aliases", () => {
+  it("accepts prototype-like canonical names", () => {
     const contract = buildContract({
       contract_name: "mapping", left_name: "a", right_name: "b",
       left_identity: "id", right_identity: "id",
@@ -206,13 +206,6 @@ describe("Contract Builder & Results Analysis & Exports", () => {
       ] }],
     });
     expect(Object.keys(contract.valueMappings.field_1_status!)).toContain("constructor");
-    expect(() => buildContract({
-      contract_name: "mapping", left_name: "a", right_name: "b",
-      left_identity: "id", right_identity: "id",
-      fields: [{ left_column: "status", right_column: "status", mode: "Value mapping", value_mappings: [
-        { canonical_value: "ONE", left_values: ["A", "A"], right_values: ["X"] },
-      ] }],
-    })).toThrow(/ambiguous left alias/i);
   });
 
   it("orchestrates full pipeline, analysis, and exports", () => {

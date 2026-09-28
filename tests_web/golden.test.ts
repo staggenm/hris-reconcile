@@ -69,7 +69,7 @@ describe("golden files", () => {
 
   it("status_matrix covers every public identity and field status", () => {
     const report = JSON.parse(runGoldenCase(CASES[1]).outputs["report.json"]);
-    for (const [summary, size] of [["identity_summary", 5], ["field_comparison_summary", 9]] as const) {
+    for (const [summary, size] of [["identity_summary", 7], ["field_comparison_summary", 9]] as const) {
       const counts = Object.values(report[summary]) as number[];
       expect(counts).toHaveLength(size);
       expect(counts.every((count) => count > 0), summary).toBe(true);

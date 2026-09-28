@@ -18,10 +18,13 @@ export type IdentityStatus =
   | "missing_left"
   | "missing_right"
   | "duplicate_left"
-  | "duplicate_right";
+  | "duplicate_right"
+  | "missing_identity_left"
+  | "missing_identity_right";
 
 export interface IdentityResult {
-  identity: string;
+  // null only for a missing identity whose raw value was null.
+  identity: string | null;
   status: IdentityStatus;
   leftRecord?: RecordRow;
   rightRecord?: RecordRow;
@@ -41,11 +44,16 @@ export type FieldComparisonStatus =
 export type ComparisonMode = "Exact" | "Normalized text" | "Value mapping" | "Ignore";
 
 export type NormalizerName =
+  | "nfc"
   | "trim"
   | "uppercase"
   | "lowercase"
   | "casefold"
   | "collapse_whitespace";
+
+// Opt-in identity key normalizers. Identity matching is exact by default.
+export type IdentityNormalizerName = "trim" | "strip_leading_zeros" | "casefold";
+export const IDENTITY_NORMALIZERS: readonly IdentityNormalizerName[] = ["trim", "strip_leading_zeros", "casefold"];
 
 export interface MappingValues {
   left: string[];
@@ -66,7 +74,7 @@ export interface ReconciliationContract {
   name: string;
   left: { name: string };
   right: { name: string };
-  identity: { left: string; right: string };
+  identity: { left: string; right: string; normalize?: IdentityNormalizerName[] };
   fields: FieldConfig[];
   valueMappings: Record<string, MappingConfig>;
 }

@@ -26,7 +26,8 @@ describe("web-owned JSON report schema", () => {
     ["an unknown identity status", (r) => { r.details.identities[0].status = "matched"; }, /\/details\/identities\/0\/status: value not in enum/],
     ["a wrong format version", (r) => { r.run_metadata.format_version = "2.0"; }, /\/run_metadata\/format_version: expected const/],
     ["a numeric raw value", (r) => { r.details.field_comparisons[0].left_raw_value = 1; }, /left_raw_value: expected type string,null/],
-    ["a null identity", (r) => { r.details.identities[0].identity = null; }, /\/details\/identities\/0\/identity: expected type string/],
+    ["a null identity on a keyed status", (r) => { r.details.identities[0].identity = null; }, /\/details\/identities\/0: matches no anyOf branch.*\/details\/identities\/0\/identity: expected type string/],
+    ["a missing-identity status with a numeric identity", (r) => { r.details.identities[0] = { identity: 1, status: "MISSING_IDENTITY_LEFT" }; }, /\/details\/identities\/0\/identity: expected type string,null/],
     ["a negative summary count", (r) => { r.identity_summary.MATCHED = -1; }, /\/identity_summary\/MATCHED: below minimum 0/],
     ["a missing summary status", (r) => { delete r.field_comparison_summary.MISMATCH; }, /missing required property 'MISMATCH'/],
   ];
@@ -38,6 +39,12 @@ describe("web-owned JSON report schema", () => {
       expect(errors.join("\n")).toMatch(expected);
     });
   }
+
+  it("accepts a null identity only for a missing-identity status", () => {
+    const report = goldenReport("status_matrix");
+    report.details.identities[0] = { identity: null, status: "MISSING_IDENTITY_RIGHT" };
+    expect(validateJsonSchema(schema, report)).toEqual([]);
+  });
 
   it("refuses schema keywords the validator does not implement", () => {
     expect(() => validateJsonSchema({ type: "string", pattern: "^a" }, "a")).toThrow(/unsupported schema keyword 'pattern'/);

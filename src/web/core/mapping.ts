@@ -45,22 +45,16 @@ export function validateMapping(
   for (const side of ["left", "right"] as const) {
     const seen = new Map<string, string>();
     for (const [canonical, values] of Object.entries(mapping)) {
-      const uniqueWithinEntry = new Set<string>();
       for (const rawAlias of values[side]) {
         const alias = normalize(rawAlias, normalizers);
         const prior = seen.get(alias);
-        if (prior !== undefined) {
+        // Only an alias resolving to two different canonicals is ambiguous;
+        // repeating it under the same canonical is harmless.
+        if (prior !== undefined && prior !== canonical) {
           throw new Error(
             `value mapping '${mappingName}' has ambiguous ${side} alias '${rawAlias}' between canonical entries '${prior}' and '${canonical}'`,
           );
         }
-        // Repeated aliases in one entry are also rejected (legacy rule).
-        if (uniqueWithinEntry.has(alias)) {
-          throw new Error(
-            `value mapping '${mappingName}' has ambiguous ${side} alias '${rawAlias}' within canonical entry '${canonical}'`,
-          );
-        }
-        uniqueWithinEntry.add(alias);
         seen.set(alias, canonical);
       }
     }

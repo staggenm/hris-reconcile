@@ -4,6 +4,7 @@ import {
   IdentityStatus,
   ReconciliationResult,
 } from "../core/types";
+import { compareCodePoints, compareNullableCodePoints } from "../core/compare";
 
 export const DISCREPANCY_STATUSES = new Set<FieldComparisonStatus>([
   "mismatch",
@@ -52,7 +53,7 @@ export function aggregateMismatchesByField(
     if (b.mismatch_count !== a.mismatch_count) {
       return b.mismatch_count - a.mismatch_count;
     }
-    return a.field_name.localeCompare(b.field_name);
+    return compareCodePoints(a.field_name, b.field_name);
   });
 
   return summaries;
@@ -86,7 +87,7 @@ export function aggregateMismatchesByPair(
   >();
 
   for (const item of details) {
-    const key = `${item.leftRawValue ?? "<null>"}|||${item.rightRawValue ?? "<null>"}|||${item.status}`;
+    const key = JSON.stringify([item.leftRawValue, item.rightRawValue, item.status]);
     const existing = counts.get(key);
     if (existing) {
       existing.count++;
@@ -118,13 +119,11 @@ export function aggregateMismatchesByPair(
     if (b.employee_count !== a.employee_count) {
       return b.employee_count - a.employee_count;
     }
-    const aLeft = a.left_value || "";
-    const bLeft = b.left_value || "";
-    if (aLeft !== bLeft) return aLeft.localeCompare(bLeft);
-    const aRight = a.right_value || "";
-    const bRight = b.right_value || "";
-    if (aRight !== bRight) return aRight.localeCompare(bRight);
-    return a.status.localeCompare(b.status);
+    return (
+      compareNullableCodePoints(a.left_value, b.left_value) ||
+      compareNullableCodePoints(a.right_value, b.right_value) ||
+      compareCodePoints(a.status, b.status)
+    );
   });
 
   return summaries;
@@ -159,6 +158,7 @@ export interface ResultsMetrics {
   missing_left: number;
   missing_right: number;
   duplicate_identities: number;
+  missing_identities: number;
   field_matches: number;
   field_discrepancies: number;
   unmapped_values: number;
@@ -181,6 +181,8 @@ export function computeResultsSummary(result: ReconciliationResult): ResultsSumm
     missing_right: 0,
     duplicate_left: 0,
     duplicate_right: 0,
+    missing_identity_left: 0,
+    missing_identity_right: 0,
   };
 
   for (const item of result.identityResults) {
@@ -235,6 +237,8 @@ export function computeResultsSummary(result: ReconciliationResult): ResultsSumm
       missing_right: identityCounts.missing_right,
       duplicate_identities:
         identityCounts.duplicate_left + identityCounts.duplicate_right,
+      missing_identities:
+        identityCounts.missing_identity_left + identityCounts.missing_identity_right,
       field_matches: fieldMatches,
       field_discrepancies: fieldDiscrepancies,
       unmapped_values: fieldCounts.unmapped_left + fieldCounts.unmapped_right,

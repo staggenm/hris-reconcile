@@ -1,19 +1,20 @@
 import { Dataset } from "../core/types";
 import { casefold } from "../core/normalization";
+import { compareCodePoints } from "../core/compare";
 import { ColumnProfile, profileDataset } from "./profiling";
 
-const FIELD_ALIASES: Record<string, number> = {
-  "firstname|givenname": 0.92,
-  "givenname|firstname": 0.92,
-  "lastname|surname": 0.92,
-  "surname|lastname": 0.92,
-  "standardhours|weeklyhours": 0.9,
-  "weeklyhours|standardhours": 0.9,
-  "personid|employeenumber": 0.88,
-  "employeenumber|personid": 0.88,
-  "company|companycode": 0.85,
-  "companycode|company": 0.85,
-};
+const FIELD_ALIASES = new Map<string, number>([
+  ["firstname|givenname", 0.92],
+  ["givenname|firstname", 0.92],
+  ["lastname|surname", 0.92],
+  ["surname|lastname", 0.92],
+  ["standardhours|weeklyhours", 0.9],
+  ["weeklyhours|standardhours", 0.9],
+  ["personid|employeenumber", 0.88],
+  ["employeenumber|personid", 0.88],
+  ["company|companycode", 0.85],
+  ["companycode|company", 0.85],
+]);
 
 function headerParts(value: string): [string, string[]] {
   const spaced = value.replace(/(?<=[a-z0-9])(?=[A-Z])/g, " ");
@@ -93,7 +94,7 @@ export function scoreFieldPair(leftColumn: string, rightColumn: string): number 
   const tokenScore = unionSize > 0 ? intersectionCount / unionSize : 0.0;
 
   const aliasKey = `${leftCompact}|${rightCompact}`;
-  const aliasScore = FIELD_ALIASES[aliasKey] ?? 0.0;
+  const aliasScore = FIELD_ALIASES.get(aliasKey) ?? 0.0;
 
   return Math.round(Math.max(characterScore, tokenScore, aliasScore) * 10000) / 10000;
 }
@@ -227,10 +228,10 @@ export function suggestIdentity(left: Dataset, right: Dataset): IdentityCandidat
 
   candidates.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    if (a.left_column !== b.left_column) {
-      return a.left_column.localeCompare(b.left_column);
-    }
-    return a.right_column.localeCompare(b.right_column);
+    return (
+      compareCodePoints(a.left_column, b.left_column) ||
+      compareCodePoints(a.right_column, b.right_column)
+    );
   });
 
   const best = candidates[0];
@@ -297,10 +298,10 @@ export function suggestFieldMappings(
 
   candidates.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    if (a.left_column !== b.left_column) {
-      return a.left_column.localeCompare(b.left_column);
-    }
-    return a.right_column.localeCompare(b.right_column);
+    return (
+      compareCodePoints(a.left_column, b.left_column) ||
+      compareCodePoints(a.right_column, b.right_column)
+    );
   });
 
   const selected: FieldSuggestion[] = [];

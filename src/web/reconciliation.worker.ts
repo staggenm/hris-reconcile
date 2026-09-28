@@ -1,5 +1,5 @@
 import { ReconciliationEngine } from "./core/reconciliation";
-import { Dataset, DatasetSummary, ReconciliationContract } from "./core/types";
+import { Dataset, DatasetSummary, IdentityNormalizerName, ReconciliationContract } from "./core/types";
 import { parseCsvContent } from "./analysis/csv";
 import { profileDataset } from "./analysis/profiling";
 import { scoreIdentityPair, suggestIdentity } from "./analysis/suggestions";
@@ -29,6 +29,7 @@ interface ResultRequest extends BaseRequest {
   rightColumn?: string;
   leftIdentity?: string;
   rightIdentity?: string;
+  identityNormalize?: IdentityNormalizerName[];
   leftField?: string;
   rightField?: string;
   fieldName?: string;
@@ -90,7 +91,7 @@ self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
       return;
     }
     if (request.type === "mapping-evidence") {
-      self.postMessage({ type: "mapping-evidence-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: analyzeObservedPairs(getDataset(request.sessionGeneration, "left"), getDataset(request.sessionGeneration, "right"), { left_identity: request.leftIdentity ?? "", right_identity: request.rightIdentity ?? "", left_field: request.leftField ?? "", right_field: request.rightField ?? "" }) });
+      self.postMessage({ type: "mapping-evidence-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: analyzeObservedPairs(getDataset(request.sessionGeneration, "left"), getDataset(request.sessionGeneration, "right"), { left_identity: request.leftIdentity ?? "", right_identity: request.rightIdentity ?? "", identity_normalize: request.identityNormalize, left_field: request.leftField ?? "", right_field: request.rightField ?? "" }) });
       return;
     }
     if (request.type === "pairs") {

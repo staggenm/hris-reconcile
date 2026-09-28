@@ -7,23 +7,33 @@ import {
   FieldMismatchSummary,
 } from "./analysis/results_analysis";
 import { buildContract, FieldSelection } from "./core/contract_builder";
+import {
+  inputFromValue,
+  manualRow,
+  MappingEditorRow,
+  MISSING_LABEL,
+  rowsFromEvidence,
+  selectionsFromRows,
+  valueFromInput,
+} from "./ui/mapping_editor";
 import { parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
 import {
   ComparisonMode,
   DatasetSummary,
   FieldComparisonResult,
+  IdentityNormalizerName,
   ReconciliationContract,
 } from "./core/types";
 
 interface MappingEditorState {
   field: { left_column: string; right_column: string };
-  evidence: ObservedPair[];
+  rows: MappingEditorRow[];
 }
 
 interface AppState {
   left: DatasetSummary | null;
   right: DatasetSummary | null;
-  identity: { left_column: string; right_column: string } | null;
+  identity: { left_column: string; right_column: string; normalize: IdentityNormalizerName[] } | null;
   fields: Array<{
     left_column: string;
     right_column: string;
@@ -105,7 +115,7 @@ function select(options: string[], value: string): HTMLSelectElement {
 }
 
 function display(value: unknown): string {
-  return value === null || value === undefined ? "<missing>" : String(value);
+  return value === null || value === undefined ? MISSING_LABEL : String(value);
 }
 
 interface TableColumn<T> {
@@ -294,7 +304,7 @@ async function scoreIdentity(): Promise<void> {
 
   $("#identity-evidence").textContent = `Conservative trimmed/case-insensitive value overlap for selection: ${evidence.overlap_percentage.toFixed(
     1,
-  )}%. Reconciliation itself keeps exact identity matching.`;
+  )}%. Reconciliation matches identities exactly unless identity normalization is selected below.`;
 
   show("#identity-confirmed", false);
   show("#step-fields", false);
@@ -303,12 +313,20 @@ async function scoreIdentity(): Promise<void> {
   show("#step-results", false);
 }
 
+function identityNormalizerInputs(): HTMLInputElement[] {
+  return Array.from(document.querySelectorAll<HTMLInputElement>("#identity-normalizers input[type=checkbox]"));
+}
+
+function selectedIdentityNormalizers(): IdentityNormalizerName[] {
+  return identityNormalizerInputs().filter((input) => input.checked).map((input) => input.value as IdentityNormalizerName);
+}
+
 function confirmIdentity(): void {
   if (!state.left || !state.right) return;
   const leftCol = ($("#left-identity") as HTMLSelectElement).value;
   const rightCol = ($("#right-identity") as HTMLSelectElement).value;
 
-  state.identity = { left_column: leftCol, right_column: rightCol };
+  state.identity = { left_column: leftCol, right_column: rightCol, normalize: selectedIdentityNormalizers() };
   show("#identity-confirmed");
 
   const suggestions = suggestFieldMappings(
@@ -457,52 +475,17 @@ async function renderMappingEditors(): Promise<void> {
   }
 
   for (const field of mappingFields) {
-    const heading = node("h3", `${field.left_column} ↔ ${field.right_column}`);
-    const evidenceRaw = await queryWorker<ObservedPair[]>("mapping-evidence", {
+    const evidence = await queryWorker<ObservedPair[]>("mapping-evidence", {
       leftIdentity: state.identity.left_column,
       rightIdentity: state.identity.right_column,
+      identityNormalize: state.identity.normalize,
       leftField: field.left_column,
       rightField: field.right_column,
     }, sessionGeneration);
     if (requestSession !== sessionGeneration || requestGeneration !== runGeneration || !state.identity) return;
-
-    const evidence: ObservedPair[] = evidenceRaw.map((item, idx) => ({
-      ...item,
-      left_display: display(item.left_value),
-      right_display: display(item.right_value),
-      assessment: item.suggested ? "High confidence" : "Review",
-      canonical_value: `CANONICAL_${String(idx + 1).padStart(3, "0")}`,
-      accepted: item.suggested,
-    }));
-
-    const editor: MappingEditorState = { field, evidence };
-    state.pairs.push(editor);
-
-    const addBtn = node("button", "Add mapping row", "secondary");
-    addBtn.type = "button";
-    addBtn.addEventListener("click", () => {
-      editor.evidence.push({
-        left_value: "",
-        right_value: "",
-        count: 0,
-        matched_percentage: 0,
-        consistency_percentage: 0,
-        suggested: false,
-        accepted: false,
-        canonical_value: "",
-        left_display: "",
-        right_display: "",
-        assessment: "Manual",
-      });
-      mappingPages.set(editor, Math.floor((editor.evidence.length - 1) / 100));
-      mappingChanged();
-      renderMappingEditorsFromState();
-    });
-
-    const block = node("div");
-    block.append(heading, mappingTable(editor), addBtn);
-    target.append(block);
+    state.pairs.push({ field, rows: rowsFromEvidence(evidence) });
   }
+  renderMappingEditorsFromState();
 }
 
 function renderMappingEditorsFromState(): void {
@@ -516,20 +499,8 @@ function renderMappingEditorsFromState(): void {
     const addBtn = node("button", "Add mapping row", "secondary");
     addBtn.type = "button";
     addBtn.addEventListener("click", () => {
-      editor.evidence.push({
-        left_value: "",
-        right_value: "",
-        count: 0,
-        matched_percentage: 0,
-        consistency_percentage: 0,
-        suggested: false,
-        accepted: false,
-        canonical_value: "",
-        left_display: "",
-        right_display: "",
-        assessment: "Manual",
-      });
-      mappingPages.set(editor, Math.floor((editor.evidence.length - 1) / 100));
+      editor.rows.push(manualRow());
+      mappingPages.set(editor, Math.floor((editor.rows.length - 1) / 100));
       mappingChanged();
       renderMappingEditorsFromState();
     });
@@ -559,10 +530,10 @@ function mappingTable(editor: MappingEditorState): HTMLDivElement {
   const body = node("tbody");
 
   const pageSize = 100;
-  const pages = Math.max(1, Math.ceil(editor.evidence.length / pageSize));
+  const pages = Math.max(1, Math.ceil(editor.rows.length / pageSize));
   const page = Math.min(mappingPages.get(editor) ?? 0, pages - 1);
   mappingPages.set(editor, page);
-  editor.evidence.slice(page * pageSize, (page + 1) * pageSize).forEach((pair) => {
+  editor.rows.slice(page * pageSize, (page + 1) * pageSize).forEach((pair) => {
     const row = node("tr");
     const checkbox = node("input");
     checkbox.type = "checkbox";
@@ -574,33 +545,31 @@ function mappingTable(editor: MappingEditorState): HTMLDivElement {
 
     const canonicalInput = node("input");
     canonicalInput.type = "text";
-    canonicalInput.value = pair.canonical_value ?? "";
+    canonicalInput.value = pair.canonical;
     canonicalInput.addEventListener("input", () => {
-      pair.canonical_value = canonicalInput.value;
+      pair.canonical = canonicalInput.value;
       mappingChanged();
     });
 
-    const leftInput = node("input");
-    leftInput.type = "text";
-    leftInput.value = pair.left_display ?? "";
-    leftInput.addEventListener("input", () => {
-      pair.left_display = leftInput.value;
-      mappingChanged();
-    });
-
-    const rightInput = node("input");
-    rightInput.type = "text";
-    rightInput.value = pair.right_display ?? "";
-    rightInput.addEventListener("input", () => {
-      pair.right_display = rightInput.value;
-      mappingChanged();
-    });
+    const valueInput = (side: "left" | "right"): HTMLInputElement => {
+      const input = node("input");
+      input.type = "text";
+      input.placeholder = MISSING_LABEL;
+      input.value = inputFromValue(pair[side]);
+      input.addEventListener("input", () => {
+        pair[side] = valueFromInput(input.value);
+        mappingChanged();
+      });
+      return input;
+    };
+    const leftInput = valueInput("left");
+    const rightInput = valueInput("right");
 
     const removeBtn = node("button", "Remove", "secondary danger");
     removeBtn.type = "button";
     removeBtn.addEventListener("click", () => {
-      editor.evidence.splice(editor.evidence.indexOf(pair), 1);
-      mappingPages.set(editor, Math.min(page, Math.max(0, Math.ceil(editor.evidence.length / pageSize) - 1)));
+      editor.rows.splice(editor.rows.indexOf(pair), 1);
+      mappingPages.set(editor, Math.min(page, Math.max(0, Math.ceil(editor.rows.length / pageSize) - 1)));
       renderMappingEditorsFromState();
       mappingChanged();
     });
@@ -612,7 +581,7 @@ function mappingTable(editor: MappingEditorState): HTMLDivElement {
       rightInput,
       node("span", String(pair.count)),
       node("span", String(pair.consistency_percentage)),
-      node("span", pair.assessment ?? ""),
+      node("span", pair.assessment),
       removeBtn,
     ];
     for (const value of cells) {
@@ -625,7 +594,7 @@ function mappingTable(editor: MappingEditorState): HTMLDivElement {
 
   table.append(head, body);
   wrapper.append(table);
-  wrapper.prepend(node("p", `Mapping evidence: ${editor.evidence.length.toLocaleString()} · page ${page + 1} of ${pages}`, "caption"));
+  wrapper.prepend(node("p", `Mapping evidence: ${editor.rows.length.toLocaleString()} · page ${page + 1} of ${pages}`, "caption"));
   const controls = node("div", "", "actions");
   const prev = node("button", "Previous page", "secondary");
   prev.type = "button"; prev.disabled = page === 0;
@@ -645,32 +614,6 @@ function mappingChanged(): void {
 }
 
 function confirmMappings(): void {
-  for (const editor of state.pairs) {
-    const accepted = editor.evidence.filter((p) => p.accepted);
-    if (accepted.length === 0) {
-      showError(
-        new Error(
-          `confirm at least one value mapping for '${editor.field.left_column}'`,
-        ),
-      );
-      return;
-    }
-    for (const p of accepted) {
-      if (
-        !p.canonical_value?.trim() ||
-        !p.left_display?.trim() ||
-        !p.right_display?.trim() ||
-        p.left_display === "<missing>" ||
-        p.right_display === "<missing>"
-      ) {
-        showError(
-          new Error("included mappings require non-missing values on both sides"),
-        );
-        return;
-      }
-    }
-  }
-
   const leftName = state.left?.name || "left";
   const rightName = state.right?.name || "right";
   const suggestedName =
@@ -681,7 +624,8 @@ function confirmMappings(): void {
 
   ($("#contract-name") as HTMLInputElement).value = suggestedName;
   const count = state.fields.filter((item) => item.mode !== "Ignore").length;
-  $("#run-summary").textContent = `Identity: ${state.identity?.left_column} ↔ ${state.identity?.right_column} · Comparison fields: ${count}`;
+  const identityRule = state.identity?.normalize.length ? ` (normalized: ${state.identity.normalize.join(", ")})` : " (exact)";
+  $("#run-summary").textContent = `Identity: ${state.identity?.left_column} ↔ ${state.identity?.right_column}${identityRule} · Comparison fields: ${count}`;
   try {
     buildCurrentContract();
   } catch (error) {
@@ -697,14 +641,13 @@ function buildCurrentContract(): ReconciliationContract {
   const fieldSelections: FieldSelection[] = state.fields.map((f) => {
     const editor = state.pairs.find((ed) => ed.field.left_column === f.left_column);
     if (f.mode !== "Value mapping" || !editor) return f;
-    return { ...f, value_mappings: editor.evidence.filter((p) => p.accepted).map((p) => ({
-      canonical_value: p.canonical_value!, left_values: [p.left_display!], right_values: [p.right_display!],
-    })) };
+    return { ...f, value_mappings: selectionsFromRows(editor.field.left_column, editor.rows) };
   });
   return buildContract({
     contract_name: ($("#contract-name") as HTMLInputElement).value.trim() || "ui_reconciliation",
     left_name: state.left.name, right_name: state.right.name,
     left_identity: state.identity.left_column, right_identity: state.identity.right_column,
+    identity_normalize: state.identity.normalize,
     fields: fieldSelections,
   });
 }
@@ -752,6 +695,7 @@ function renderMetrics(summary: ResultsSummary): void {
     [summary.metrics.missing_left, "Missing in Dataset A"],
     [summary.metrics.missing_right, "Missing in Dataset B"],
     [summary.metrics.duplicate_identities, "Duplicate identities"],
+    [summary.metrics.missing_identities, "Missing identity values"],
     [summary.metrics.field_matches, "Field matches"],
     [summary.metrics.field_discrepancies, "Field discrepancies"],
     [summary.metrics.unmapped_values, "Unmapped values"],
@@ -965,6 +909,7 @@ function clearSession(): void {
   ($( "#right-identity") as HTMLSelectElement).replaceChildren();
   ($( "#result-field") as HTMLSelectElement).replaceChildren();
   ($( "#result-pair") as HTMLSelectElement).replaceChildren();
+  for (const input of identityNormalizerInputs()) input.checked = false;
   ($("#left-file") as HTMLInputElement).value = "";
   ($("#right-file") as HTMLInputElement).value = "";
 
@@ -1037,6 +982,10 @@ rightFileInput.addEventListener("change", (e) => {
   const files = (e.target as HTMLInputElement).files;
   if (files && files[0]) upload("right", files[0]).catch(showError);
 });
+
+for (const input of identityNormalizerInputs()) {
+  input.addEventListener("change", () => { void scoreIdentity().catch(showError); });
+}
 
 setupDragAndDrop("left");
 setupDragAndDrop("right");

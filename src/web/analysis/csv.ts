@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import { compareCodePoints } from "../core/compare";
 import { Dataset, RecordRow } from "../core/types";
 
 export class CsvParseError extends Error {
@@ -124,7 +125,7 @@ export function parseCsvContent(
     seenHeaders.add(col);
   }
   if (duplicateHeaders.size > 0) {
-    const sortedDups = Array.from(duplicateHeaders).sort();
+    const sortedDups = Array.from(duplicateHeaders).sort(compareCodePoints);
     throw new CsvParseError(
       `CSV contains duplicate column names: ${sortedDups.join(", ")}`,
     );

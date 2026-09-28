@@ -22,7 +22,9 @@
     "MISSING_LEFT": 1,
     "MISSING_RIGHT": 1,
     "DUPLICATE_LEFT": 0,
-    "DUPLICATE_RIGHT": 0
+    "DUPLICATE_RIGHT": 0,
+    "MISSING_IDENTITY_LEFT": 0,
+    "MISSING_IDENTITY_RIGHT": 0
   },
   "field_comparison_summary": {
     "MATCH_EXACT": 15,

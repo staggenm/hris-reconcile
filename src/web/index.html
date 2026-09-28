@@ -67,6 +67,12 @@
           <span class="arrow">↔</span>
           <label>Dataset B identity<select id="right-identity"></select></label>
         </div>
+        <fieldset id="identity-normalizers" class="identity-normalizers">
+          <legend>Identity normalization (optional, applied to both sides; matching is exact by default)</legend>
+          <label><input type="checkbox" value="trim">Trim whitespace</label>
+          <label><input type="checkbox" value="strip_leading_zeros">Strip leading zeros</label>
+          <label><input type="checkbox" value="casefold">Ignore case</label>
+        </fieldset>
         <p id="identity-evidence" class="caption"></p>
         <button id="confirm-identity">Confirm employee identity</button>
         <span id="identity-confirmed" class="success hidden" role="status" aria-live="polite">Employee identity fields confirmed.</span>

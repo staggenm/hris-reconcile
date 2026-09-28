@@ -66,7 +66,8 @@ test("standalone workflow, styled view, exports, and zero egress", async ({ page
   await expect(page.locator("#step-results")).toBeHidden();
   expect(await page.locator("#left-dataset").textContent()).toBe("");
   expect(await page.locator("body").innerText()).not.toMatch(/Ada|Grace|001|002/);
-  expect(await page.locator("input").evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value))).toEqual(["", "", ""]);
+  expect(await page.locator("input:not([type=checkbox])").evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value))).toEqual(["", "", ""]);
+  expect(await page.locator("#identity-normalizers input:checked").count()).toBe(0);
   expect(await page.evaluate(() => (window as any).__egressCalls)).toEqual([]);
   expect(egress).toEqual([]);
   expect(errors).toEqual([]);
@@ -191,4 +192,62 @@ test("capture synthetic desktop and narrow workflow screenshots", async ({ page,
   await page.screenshot({ path: resolve(output, "04-results-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: resolve(output, "05-results-narrow.png"), fullPage: true });
+});
+
+async function mappingRows(page: import("@playwright/test").Page) {
+  return page.locator("#mapping-editors tbody tr").evaluateAll((rows) =>
+    rows.map((row) => Array.from(row.querySelectorAll<HTMLInputElement>("input[type=text]")).map((input) => input.value)));
+}
+
+async function metric(page: import("@playwright/test").Page, label: string) {
+  return page.locator(".metric", { hasText: label }).locator("strong").textContent();
+}
+
+test("mapping rows can share a canonical value and accept sentinel-like real values", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from("person_id,status\n001,FT\n002,F\n003,<missing>\n") });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from("employee_number,status\n001,Full\n002,Full\n003,Odd\n") });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#field-rows select").nth(2).selectOption("Value mapping");
+  await page.locator("#confirm-fields").click();
+  await expect(page.locator("#mapping-editors tbody tr")).toHaveCount(3);
+  const rows = await mappingRows(page);
+  const canonicals: Record<string, string> = { FT: "FULL", F: "FULL", "<missing>": "ODD" };
+  for (const [index, [, left]] of rows.entries()) {
+    const row = page.locator("#mapping-editors tbody tr").nth(index);
+    await row.locator("input[type=checkbox]").check();
+    await row.locator("input[type=text]").nth(0).fill(canonicals[left]);
+  }
+  await page.locator("#confirm-mappings").click();
+  await expect(page.locator("#error")).toBeHidden();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  expect(await metric(page, "Field matches")).toBe("3");
+  expect(await metric(page, "Field discrepancies")).toBe("0");
+  expect(errors).toEqual([]);
+});
+
+test("identity normalizers match leading-zero keys and blank identities are counted, not fatal", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from("person_id,first_name\n00012345,Ada\n0002,Grace\n,Nobody\n") });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from("employee_number,given_name\n12345,Ada\n2,Grace\n") });
+  await page.locator("#left-identity").selectOption("person_id");
+  await page.locator("#right-identity").selectOption("employee_number");
+  await page.getByLabel("Strip leading zeros").check();
+  await page.locator("#confirm-identity").click();
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  expect(await metric(page, "Matched employees")).toBe("2");
+  expect(await metric(page, "Missing identity values")).toBe("1");
+  expect(await metric(page, "Field discrepancies")).toBe("0");
+  await page.getByLabel("Strip leading zeros").uncheck();
+  await expect(page.locator("#step-results")).toBeHidden();
+  await expect(page.locator("#step-fields")).toBeHidden();
+  expect(errors).toEqual([]);
 });

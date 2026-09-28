@@ -1,6 +1,8 @@
 import {
   ComparisonMode,
   FieldConfig,
+  IDENTITY_NORMALIZERS,
+  IdentityNormalizerName,
   MappingConfig,
   NormalizerName,
   ReconciliationContract,
@@ -34,10 +36,12 @@ export interface WizardConfiguration {
   right_name: string;
   left_identity: string;
   right_identity: string;
+  identity_normalize?: IdentityNormalizerName[];
   fields: FieldSelection[];
 }
 
 const NORMALIZED_TEXT_CHAIN: NormalizerName[] = [
+  "nfc",
   "trim",
   "collapse_whitespace",
   "casefold",
@@ -54,7 +58,9 @@ function buildMapping(field: FieldSelection): MappingConfig {
       `value mapping field '${field.left_column}' has no confirmed mappings`,
     );
   }
-  const mapping = Object.create(null) as MappingConfig;
+  // Rows sharing a canonical value form one N:1 / 1:N entry; aliases are
+  // deduplicated in first-seen order.
+  const grouped = new Map<string, { left: Set<string>; right: Set<string> }>();
   for (const selection of field.value_mappings) {
     if (
       !selection.canonical_value ||
@@ -65,20 +71,31 @@ function buildMapping(field: FieldSelection): MappingConfig {
         "value mapping entries require a canonical value and both sides",
       );
     }
-    if (Object.prototype.hasOwnProperty.call(mapping, selection.canonical_value)) {
-      throw new WizardConfigurationError(
-        `canonical value '${selection.canonical_value}' is used more than once`,
-      );
+    let entry = grouped.get(selection.canonical_value);
+    if (!entry) {
+      entry = { left: new Set(), right: new Set() };
+      grouped.set(selection.canonical_value, entry);
     }
-    mapping[selection.canonical_value] = {
-      left: [...selection.left_values],
-      right: [...selection.right_values],
-    };
+    for (const value of selection.left_values) entry.left.add(value);
+    for (const value of selection.right_values) entry.right.add(value);
+  }
+  const mapping = Object.create(null) as MappingConfig;
+  for (const [canonical, entry] of grouped) {
+    mapping[canonical] = { left: [...entry.left], right: [...entry.right] };
   }
   validateMapping(field.left_column, mapping);
   const normalizers = field.mode === "Normalized text" ? NORMALIZED_TEXT_CHAIN : [];
   validateMapping(field.left_column, mapping, normalizers);
   return mapping;
+}
+
+function identityNormalizers(selected: IdentityNormalizerName[] = []): IdentityNormalizerName[] {
+  for (const name of selected) {
+    if (!IDENTITY_NORMALIZERS.includes(name)) {
+      throw new WizardConfigurationError(`unsupported identity normalizer '${name}'`);
+    }
+  }
+  return IDENTITY_NORMALIZERS.filter((name) => selected.includes(name));
 }
 
 export function buildContract(configuration: WizardConfiguration): ReconciliationContract {
@@ -137,6 +154,7 @@ export function buildContract(configuration: WizardConfiguration): Reconciliatio
     identity: {
       left: configuration.left_identity,
       right: configuration.right_identity,
+      normalize: identityNormalizers(configuration.identity_normalize),
     },
     fields: configuredFields,
     valueMappings,
