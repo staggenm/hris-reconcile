@@ -4,7 +4,10 @@ import { ReconciliationEngine } from "./core/reconciliation";
 import { Dataset, DatasetSummary, IdentityNormalizerName, ReconciliationContract } from "./core/types";
 import { CsvEncoding, parseCsvContent } from "./analysis/csv";
 import { DatasetAnalysis } from "./analysis/dataset_analysis";
-import { scoreIdentityPair, suggestIdentity } from "./analysis/suggestions";
+import { scoreIdentityPair, suggestFieldMappings, suggestIdentity } from "./analysis/suggestions";
+import { buildContract, WizardConfiguration } from "./core/contract_builder";
+import { parseContractDocument, serializeContract, validateContractColumns, WizardState, wizardStateFromContract } from "./core/contract_document";
+import { canPrefillWizard, contractSummary, ContractSummary } from "./ui/contract_summary";
 import { analyzeObservedPairs } from "./analysis/mapping_analysis";
 import { aggregateMismatchesByField, aggregateMismatchesByPair, computeResultsSummary, identityIssuesPage, mismatchDetails, matchingDetailsPage } from "./analysis/results_analysis";
 import { buildReportMetadata, csvChunks, exportBlob, jsonChunks, SourceInfo } from "./core/export";
@@ -49,7 +52,27 @@ interface ResultRequest extends BaseRequest {
   resultId?: number;
 }
 
-type WorkerRequest = ReconcileRequest | ParseRequest | ResultRequest;
+// Contract logic runs here, so the normalizers and the casefold table never
+// load on the main thread.
+interface ContractRequest extends BaseRequest {
+  type: "suggest-fields" | "build-contract" | "import-contract" | "serialize-contract";
+  leftIdentity?: string;
+  rightIdentity?: string;
+  configuration?: WizardConfiguration;
+  text?: string;
+  fileName?: string;
+  contract?: ReconciliationContract;
+}
+
+export interface ImportedContract {
+  contract: ReconciliationContract;
+  // Present when the wizard can represent the contract.
+  wizard: WizardState | null;
+  // Present when it cannot (Custom normalizers).
+  summary: ContractSummary | null;
+}
+
+type WorkerRequest = ReconcileRequest | ParseRequest | ResultRequest | ContractRequest;
 let latestResult: ReconciliationResult | null = null;
 let latestContract: ReconciliationContract | null = null;
 let latestResultId = 0;
@@ -107,6 +130,34 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
         sessionGeneration: request.sessionGeneration,
         payload: { summary, profiles: analysis.profiles() },
       });
+      return;
+    }
+    if (request.type === "suggest-fields" || request.type === "build-contract" || request.type === "import-contract" || request.type === "serialize-contract") {
+      let payload: unknown;
+      if (request.type === "suggest-fields") {
+        payload = suggestFieldMappings(getDataset(request.sessionGeneration, "left").columns, getDataset(request.sessionGeneration, "right").columns, {
+          excludedLeft: new Set([request.leftIdentity ?? ""]),
+          excludedRight: new Set([request.rightIdentity ?? ""]),
+        });
+      } else if (request.type === "build-contract") {
+        payload = buildContract(request.configuration!);
+      } else if (request.type === "serialize-contract") {
+        payload = `${JSON.stringify(serializeContract(request.contract!), null, 2)}\n`;
+      } else {
+        let input: unknown;
+        try {
+          input = JSON.parse(request.text ?? "");
+        } catch {
+          throw new AppError("CONTRACT_INVALID", `'${request.fileName}' is not valid JSON`);
+        }
+        const contract = parseContractDocument(input);
+        validateContractColumns(contract, getDataset(request.sessionGeneration, "left").columns, getDataset(request.sessionGeneration, "right").columns);
+        const imported: ImportedContract = canPrefillWizard(contract)
+          ? { contract, wizard: wizardStateFromContract(contract), summary: null }
+          : { contract, wizard: null, summary: contractSummary(contract) };
+        payload = imported;
+      }
+      self.postMessage({ type: `${request.type}-result`, requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload });
       return;
     }
     if (request.type === "suggest-identity") {

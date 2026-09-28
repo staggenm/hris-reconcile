@@ -70,4 +70,18 @@ describe("production CSP", () => {
     expect(html).not.toContain('"true" !== "true"');
     expect(html).not.toContain("source-only");
   });
+
+  it("keeps field-name suggestion, contract logic, and the casefold table out of the main bundle", () => {
+    const main = blocks("script").reduce((longest, script) => (script.length > longest.length ? script : longest), "");
+    // The inlined worker is the largest string literal in the main script.
+    const literals = Array.from(main.matchAll(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g), (match) => match[0]);
+    const worker = literals.reduce((longest, literal) => (literal.length > longest.length ? literal : longest), "");
+    const mainCode = main.replace(worker, "");
+    for (const marker of ["\u01c5", "deterministic header-name similarity", "unsupported identity normalizer", "is not supported (expected"]) {
+      const inWorker = worker.includes(marker) || worker.includes(JSON.stringify(marker).slice(1, -1));
+      expect(inWorker, `${marker} should be in the worker`).toBe(true);
+      expect(mainCode.includes(marker), `${marker} should not be in the main bundle`).toBe(false);
+    }
+  });
 });
+

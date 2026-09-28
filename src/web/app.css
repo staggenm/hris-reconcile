@@ -389,7 +389,12 @@ main[aria-busy="true"] .step[data-state="active"] .step-body { cursor: progress;
   box-shadow: var(--shadow-2);
   transition: box-shadow var(--dur) var(--ease);
 }
-.step[data-state="done"] .step-body { box-shadow: var(--shadow-1); }
+.step[data-state="done"] .step-body {
+  box-shadow: var(--shadow-1);
+  /* Completed steps skip rendering work while off-screen. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 480px;
+}
 .step[data-state="stale"] .step-body { border-color: var(--warn-border); }
 .step-body > h2 + p { color: var(--text-3); font-size: 14px; margin-bottom: 20px; }
 

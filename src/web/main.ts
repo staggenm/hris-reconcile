@@ -1,17 +1,19 @@
 import { AppError, errorCodeOf } from "./core/errors";
 import { checkFileSize } from "./core/limits";
-import { CsvEncoding } from "./analysis/csv";
-import { ColumnProfile } from "./analysis/profiling";
-import { suggestFieldMappings } from "./analysis/suggestions";
-import { ObservedPair } from "./analysis/mapping_analysis";
-import {
+// Type-only imports from analysis/ and core/ modules keep their code (the
+// normalizers, the casefold table, contract parsing) in the worker bundle.
+import type { CsvEncoding } from "./analysis/csv";
+import type { ColumnProfile } from "./analysis/profiling";
+import type { FieldSuggestion, IdentityCandidate } from "./analysis/suggestions";
+import type { ObservedPair } from "./analysis/mapping_analysis";
+import type {
   IdentityIssue,
   PairMismatchSummary,
   ResultsSummary,
   FieldMismatchSummary,
 } from "./analysis/results_analysis";
-import { buildContract, FieldSelection } from "./core/contract_builder";
-import { parseContractDocument, serializeContract, validateContractColumns, wizardStateFromContract } from "./core/contract_document";
+import type { FieldSelection, WizardConfiguration } from "./core/contract_builder";
+import type { ImportedContract } from "./reconciliation.worker";
 import {
   inputFromValue,
   manualRow,
@@ -23,12 +25,13 @@ import {
 } from "./ui/mapping_editor";
 import { busyLabel } from "./ui/busy";
 import { metricTiles } from "./ui/metrics";
-import { canPrefillWizard, contractSummary, ContractSummary } from "./ui/contract_summary";
+import type { ContractSummary } from "./ui/contract_summary";
 import { pairOptions, selectedPair } from "./ui/drilldown";
+import { debounce } from "./ui/debounce";
 import { assertCsvFile } from "./ui/files";
 import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, invalidationNote, Progress, reach, reachSkipping, STEP_IDS, StepId, stepStates } from "./ui/steps";
 import { onBusyChange, onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
-import {
+import type {
   ComparisonMode,
   DatasetSummary,
   FieldComparisonResult,
@@ -312,7 +315,7 @@ function renderDataset(
 
 async function startIdentity(): Promise<void> {
   if (!state.left || !state.right) return;
-  const suggestion = await queryWorker<import("./analysis/suggestions").IdentityCandidate>("suggest-identity", {}, sessionGeneration);
+  const suggestion = await queryWorker<IdentityCandidate>("suggest-identity", {}, sessionGeneration);
   const banner = $("#identity-suggestion");
   banner.replaceChildren();
 
@@ -370,21 +373,15 @@ function selectedIdentityNormalizers(): IdentityNormalizerName[] {
   return identityNormalizerInputs().filter((input) => input.checked).map((input) => input.value as IdentityNormalizerName);
 }
 
-function confirmIdentity(): void {
+async function confirmIdentity(): Promise<void> {
   if (!state.left || !state.right) return;
   const leftCol = ($("#left-identity") as HTMLSelectElement).value;
   const rightCol = ($("#right-identity") as HTMLSelectElement).value;
+  const generation = runGeneration;
+  const suggestions = await queryWorker<FieldSuggestion[]>("suggest-fields", { leftIdentity: leftCol, rightIdentity: rightCol }, sessionGeneration);
+  if (generation !== runGeneration || !state.left || !state.right) return;
 
   state.identity = { left_column: leftCol, right_column: rightCol, normalize: selectedIdentityNormalizers() };
-
-  const suggestions = suggestFieldMappings(
-    state.left.columns,
-    state.right.columns,
-    {
-      excludedLeft: new Set([leftCol]),
-      excludedRight: new Set([rightCol]),
-    },
-  );
 
   state.fields = suggestions.map((item) => ({
     left_column: item.left_column,
@@ -598,8 +595,9 @@ function mappingTable(editor: MappingEditorState): HTMLDivElement {
     canonicalInput.value = pair.canonical;
     canonicalInput.addEventListener("input", () => {
       pair.canonical = canonicalInput.value;
-      mappingChanged();
+      mappingEdited.schedule();
     });
+    canonicalInput.addEventListener("change", () => mappingEdited.flush());
 
     const valueInput = (side: "left" | "right"): HTMLInputElement => {
       const input = node("input");
@@ -608,8 +606,9 @@ function mappingTable(editor: MappingEditorState): HTMLDivElement {
       input.value = inputFromValue(pair[side]);
       input.addEventListener("input", () => {
         pair[side] = valueFromInput(input.value);
-        mappingChanged();
+        mappingEdited.schedule();
       });
+      input.addEventListener("change", () => mappingEdited.flush());
       return input;
     };
     const leftInput = valueInput("left");
@@ -658,11 +657,17 @@ function mappingTable(editor: MappingEditorState): HTMLDivElement {
 }
 
 function mappingChanged(): void {
+  mappingEdited.cancel();
   invalidateResults();
   edit("value-mappings");
 }
 
-function confirmMappings(): void {
+// Typing updates the rows at once, but resets later steps only when the user
+// pauses or leaves the field, not on every keystroke.
+const mappingEdited = debounce(mappingChanged, 300);
+
+async function confirmMappings(): Promise<void> {
+  mappingEdited.flush();
   const leftName = state.left?.name || "left";
   const rightName = state.right?.name || "right";
   const suggestedName =
@@ -675,35 +680,40 @@ function confirmMappings(): void {
   const count = state.fields.filter((item) => item.mode !== "Ignore").length;
   const identityRule = state.identity?.normalize.length ? ` (normalized: ${state.identity.normalize.join(", ")})` : " (exact)";
   $("#run-summary").textContent = `Identity: ${state.identity?.left_column} ↔ ${state.identity?.right_column}${identityRule} · Comparison fields: ${count}`;
+  const generation = runGeneration;
   try {
-    buildCurrentContract();
+    await buildCurrentContract();
   } catch (error) {
     showError(error);
     return;
   }
+  if (generation !== runGeneration) return;
   setProgress(confirmStep(progress, "mappings"));
   focusStep("run");
 }
 
-function buildCurrentContract(): ReconciliationContract {
+// The wizard state becomes a configuration here; the worker validates it and
+// builds the contract.
+async function buildCurrentContract(): Promise<ReconciliationContract> {
   if (!state.left || !state.right || !state.identity) throw new AppError("SESSION_STATE", "upload both datasets and confirm identity first");
   const fieldSelections: FieldSelection[] = state.fields.map((f) => {
     const editor = state.pairs.find((ed) => ed.field.left_column === f.left_column);
     if (f.mode !== "Value mapping" || !editor) return f;
     return { ...f, value_mappings: selectionsFromRows(editor.field.left_column, editor.rows) };
   });
-  return buildContract({
+  const configuration: WizardConfiguration = {
     contract_name: ($("#contract-name") as HTMLInputElement).value.trim() || "ui_reconciliation",
     left_name: state.left.name, right_name: state.right.name,
     left_identity: state.identity.left_column, right_identity: state.identity.right_column,
     identity_normalize: state.identity.normalize,
     fields: fieldSelections,
-  });
+  };
+  return queryWorker<ReconciliationContract>("build-contract", { configuration }, sessionGeneration);
 }
 
 async function runReconciliation(): Promise<void> {
   if (!state.left || !state.right || !state.identity) return;
-  const contract = buildCurrentContract();
+  const contract = await buildCurrentContract();
   setProgress(reach("run"));
   await runContract(contract, () => setProgress(confirmStep(progress, "run")));
 }
@@ -754,9 +764,9 @@ async function loadIdentityIssues(pageNumber: number): Promise<void> {
   ));
 }
 
-function saveContract(): void {
-  const contract = buildCurrentContract();
-  const text = `${JSON.stringify(serializeContract(contract), null, 2)}\n`;
+async function saveContract(): Promise<void> {
+  const contract = await buildCurrentContract();
+  const text = await queryWorker<string>("serialize-contract", { contract }, sessionGeneration);
   saveBlob(new Blob([text], { type: "application/json;charset=utf-8" }), `${contract.name}.contract.json`);
 }
 
@@ -764,20 +774,13 @@ function saveContract(): void {
 // uploaded columns, then pre-fills every wizard step up to "Run comparison".
 async function loadContract(file: File): Promise<void> {
   if (!state.left || !state.right) throw new AppError("SESSION_STATE", "upload both datasets before loading a contract");
-  let input: unknown;
-  try {
-    input = JSON.parse(await file.text());
-  } catch {
-    throw new AppError("CONTRACT_INVALID", `'${file.name}' is not valid JSON`);
-  }
-  const contract = parseContractDocument(input);
-  validateContractColumns(contract, state.left.columns, state.right.columns);
-  if (!canPrefillWizard(contract)) {
-    showContractSummary(contract, file.name);
+  const imported = await queryWorker<ImportedContract>("import-contract", { text: await file.text(), fileName: file.name }, sessionGeneration);
+  const { contract, wizard, summary } = imported;
+  if (!wizard) {
+    showContractSummary(contract, summary!, file.name);
     return;
   }
   hideContractSummary();
-  const wizard = wizardStateFromContract(contract);
 
   invalidateResults();
   for (const side of ["left", "right"] as const) {
@@ -800,14 +803,13 @@ async function loadContract(file: File): Promise<void> {
   renderMappingEditorsFromState();
   setProgress(reach("mappings"));
 
-  confirmMappings();
+  await confirmMappings();
   ($("#contract-name") as HTMLInputElement).value = contract.name;
 }
 
 // A contract the wizard cannot represent (Custom normalizers) is shown
 // read-only and can be run as-is, skipping the wizard steps.
-function showContractSummary(contract: ReconciliationContract, fileName: string): void {
-  const summary = contractSummary(contract);
+function showContractSummary(contract: ReconciliationContract, summary: ContractSummary, fileName: string): void {
   const panel = $("#contract-summary");
   const title = node("h3", `Imported contract: ${summary.name}`);
   const explanation = node("p", `${fileName} uses settings the wizard cannot edit (Custom normalizers). Review it, then run it as-is or discard it.`, "caption");

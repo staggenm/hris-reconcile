@@ -561,6 +561,8 @@ test("theme: system fonts, light and dark tokens, sticky tabular tables, chevron
   expect(await table.locator(".table-scroll").evaluate((el) => getComputedStyle(el).maxHeight)).not.toBe("none");
   expect(await table.locator("td").first().evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/monospace/);
 
+  expect(await page.locator("#step-upload .step-body").evaluate((el) => getComputedStyle(el).contentVisibility)).toBe("auto");
+  expect(await page.locator("#step-results .step-body").evaluate((el) => getComputedStyle(el).contentVisibility)).not.toBe("auto");
   const toneColor = (tone: string) => page.locator(`.metric[data-tone="${tone}"]`).first().evaluate((el) => getComputedStyle(el, "::before").backgroundColor);
   expect(await toneColor("bad")).not.toBe(await toneColor("ok"));
   expect(await page.locator("#step-upload .step-number").evaluate((el) => getComputedStyle(el, "::after").maskImage || getComputedStyle(el, "::after").webkitMaskImage)).toMatch(/data:image\/svg\+xml/);

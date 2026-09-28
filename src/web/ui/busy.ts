@@ -11,6 +11,10 @@ export const BUSY_LABELS = {
   details: "Loading results…",
   "matching-details": "Loading results…",
   "identity-issues": "Loading results…",
+  "suggest-fields": "Suggesting field matches…",
+  "build-contract": "Checking the configuration…",
+  "import-contract": "Checking the contract…",
+  "serialize-contract": "Preparing the contract…",
 } as const;
 
 export function busyLabel(pendingTypes: readonly string[]): string | null {
