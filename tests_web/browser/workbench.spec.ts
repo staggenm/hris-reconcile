@@ -530,3 +530,37 @@ test("steps expose data-state, metric tiles data-tone, and a reset explains itse
   await expect(page.locator("#step-mappings")).toHaveAttribute("data-state", "done");
   await expect(page.locator("#step-mappings .step-note")).toHaveCount(0);
 });
+
+test("theme: system fonts, light and dark tokens, sticky tabular tables, chevrons, tones", async ({ page }) => {
+  await page.goto(artifact);
+  const fontFamily = await page.locator("body").evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(fontFamily).not.toMatch(/Inter/);
+  expect(fontFamily).toMatch(/system-ui/);
+  const luminance = async () => page.locator("body").evaluate((el) => {
+    const [r, g, b] = getComputedStyle(el).backgroundColor.match(/\d+(\.\d+)?/g)!.map(Number);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  });
+  await page.emulateMedia({ colorScheme: "light" });
+  expect(await luminance()).toBeGreaterThan(0.9);
+  await page.emulateMedia({ colorScheme: "dark" });
+  expect(await luminance()).toBeLessThan(0.1);
+  await page.emulateMedia({ colorScheme: "light" });
+
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv) });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightRichCsv + "003,Linus,9999\n") });
+  expect(await page.locator("#left-identity").evaluate((el) => getComputedStyle(el).backgroundImage)).toMatch(/^url\("data:image\/svg\+xml/);
+  await page.locator("#confirm-identity").click();
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#identity-issues table")).toBeVisible();
+  const table = page.locator("#identity-issues");
+  expect(await table.locator("th").first().evaluate((el) => getComputedStyle(el).position)).toBe("sticky");
+  expect(await table.locator("table").evaluate((el) => getComputedStyle(el).fontVariantNumeric)).toBe("tabular-nums");
+  expect(await table.locator(".table-scroll").evaluate((el) => getComputedStyle(el).maxHeight)).not.toBe("none");
+  expect(await table.locator("td").first().evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/monospace/);
+
+  const toneColor = (tone: string) => page.locator(`.metric[data-tone="${tone}"]`).first().evaluate((el) => getComputedStyle(el, "::before").backgroundColor);
+  expect(await toneColor("bad")).not.toBe(await toneColor("ok"));
+  expect(await page.locator("#step-upload .step-number").evaluate((el) => getComputedStyle(el, "::after").maskImage || getComputedStyle(el, "::after").webkitMaskImage)).toMatch(/data:image\/svg\+xml/);
+});
