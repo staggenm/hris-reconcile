@@ -641,3 +641,20 @@ test("accessibility: focus moves to the next step, tables have captions and scop
   await page.locator("#error").getByRole("button", { name: "Dismiss" }).click();
   await expect(page.locator("#error")).toBeHidden();
 });
+
+test("drill-down options carry the index in value, not in the label", async ({ page }) => {
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from("person_id,status\n001,A\n002,A\n003,B\n") });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from("employee_number,status\n001,X\n002,X\n003,Y\n") });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#result-pair option")).toHaveCount(3);
+  const options = await page.locator("#result-pair option").evaluateAll((all) => all.map((o) => [(o as HTMLOptionElement).value, o.textContent]));
+  expect(options).toEqual([["all", "All mismatch pairs"], ["0", "A ↔ X (2)"], ["1", "B ↔ Y (1)"]]);
+  await page.locator("#result-pair").selectOption("1");
+  await expect(page.locator("#detail-summary")).toContainText("Employee details: 1");
+  await expect(page.locator("#detail-summary tbody tr")).toHaveCount(1);
+  await expect(page.locator("#detail-summary tbody")).toContainText("003");
+});

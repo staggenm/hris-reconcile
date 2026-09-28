@@ -23,6 +23,7 @@ import {
 } from "./ui/mapping_editor";
 import { busyLabel } from "./ui/busy";
 import { metricTiles } from "./ui/metrics";
+import { pairOptions, selectedPair } from "./ui/drilldown";
 import { assertCsvFile } from "./ui/files";
 import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, invalidationNote, Progress, reach, STEP_IDS, StepId, stepStates } from "./ui/steps";
 import { onBusyChange, onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
@@ -885,18 +886,12 @@ async function loadPairs(pageNumber = 0): Promise<void> {
     ),
   );
 
-  const pairSelect = select(
-    [
-      "All mismatch pairs",
-      ...page.rows.map(
-        (row, index) =>
-          `${index}: ${display(row.left_value)} ↔ ${display(
-            row.right_value,
-          )} (${row.employee_count})`,
-      ),
-    ],
-    "All mismatch pairs",
-  );
+  const pairSelect = node("select");
+  for (const { value, label } of pairOptions(page.rows)) {
+    const option = node("option", label);
+    option.value = value;
+    pairSelect.append(option);
+  }
   pairSelect.id = "result-pair";
   $("#result-pair").replaceWith(pairSelect);
   pairSelect.addEventListener("change", () => loadDetails(0).catch(showError));
@@ -913,15 +908,12 @@ async function loadDetails(pageNumber = 0): Promise<void> {
   let leftVal: string | null = null;
   let rightVal: string | null = null;
 
-  if (selection !== "All mismatch pairs") {
-    const pairIndex = Number(selection.split(":", 1)[0]);
-    const pair = state.resultPairs[pairIndex];
-    if (pair) {
-      filterLeft = true;
-      filterRight = true;
-      leftVal = pair.left_value;
-      rightVal = pair.right_value;
-    }
+  const pair = selectedPair(selection, state.resultPairs);
+  if (pair) {
+    filterLeft = true;
+    filterRight = true;
+    leftVal = pair.left_value;
+    rightVal = pair.right_value;
   }
 
   const page = await queryWorker<WorkerPage<FieldComparisonResult>>("details", {
