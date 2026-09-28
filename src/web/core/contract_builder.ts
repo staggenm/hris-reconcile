@@ -52,6 +52,11 @@ function mappingName(index: number, fieldName: string): string {
   return `field_${index}_${slug || "mapping"}`;
 }
 
+function describeRow(selection: ValueMappingSelection): string {
+  const values = (items: string[]) => items.map((item) => `'${item}'`).join(", ");
+  return `${values(selection.left_values)} ↔ ${values(selection.right_values)} → '${selection.canonical_value}'`;
+}
+
 function buildMapping(field: FieldSelection): MappingConfig {
   if (!field.value_mappings || field.value_mappings.length === 0) {
     throw new WizardConfigurationError(
@@ -59,8 +64,10 @@ function buildMapping(field: FieldSelection): MappingConfig {
     );
   }
   // Rows sharing a canonical value form one N:1 / 1:N entry; aliases are
-  // deduplicated in first-seen order.
+  // deduplicated in first-seen order. A value claimed by two canonicals is a
+  // conflict, reported with both rows.
   const grouped = new Map<string, { left: Set<string>; right: Set<string> }>();
+  const claimed = { left: new Map<string, ValueMappingSelection>(), right: new Map<string, ValueMappingSelection>() };
   for (const selection of field.value_mappings) {
     if (
       !selection.canonical_value ||
@@ -70,6 +77,18 @@ function buildMapping(field: FieldSelection): MappingConfig {
       throw new WizardConfigurationError(
         "value mapping entries require a canonical value and both sides",
       );
+    }
+    for (const side of ["left", "right"] as const) {
+      for (const value of selection[`${side}_values`]) {
+        const prior = claimed[side].get(value);
+        if (prior && prior.canonical_value !== selection.canonical_value) {
+          throw new WizardConfigurationError(
+            `value mapping for field '${field.left_column}': rows ${describeRow(prior)} and ${describeRow(selection)} ` +
+              `map Dataset ${side === "left" ? "A" : "B"} value '${value}' to different canonical values`,
+          );
+        }
+        claimed[side].set(value, selection);
+      }
     }
     let entry = grouped.get(selection.canonical_value);
     if (!entry) {

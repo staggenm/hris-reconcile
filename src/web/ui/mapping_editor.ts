@@ -16,11 +16,14 @@ export interface MappingEditorRow {
 // Render-only label for a null value (used as the input placeholder).
 export const MISSING_LABEL = "<missing>";
 
+// The default canonical value is the Dataset B value (Dataset A if B is
+// null), so N:1 rows sharing a B value group without manual edits while a
+// genuine 1:N conflict still surfaces as an error.
 export function rowsFromEvidence(evidence: ObservedPair[]): MappingEditorRow[] {
-  return evidence.map((item, index) => ({
+  return evidence.map((item) => ({
     left: item.left_value,
     right: item.right_value,
-    canonical: `CANONICAL_${String(index + 1).padStart(3, "0")}`,
+    canonical: item.right_value ?? item.left_value ?? "",
     accepted: item.suggested,
     count: item.count,
     consistency_percentage: item.consistency_percentage,

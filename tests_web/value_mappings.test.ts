@@ -36,9 +36,9 @@ describe("grouped value mappings", () => {
 
   it("rejects an alias that resolves to different canonical values", () => {
     expect(() => mappingOf([row("ONE", "A", "X"), row("TWO", "A", "Y")]))
-      .toThrow(/ambiguous left alias 'A' between canonical entries 'ONE' and 'TWO'/);
+      .toThrow("value mapping for field 'status': rows 'A' ↔ 'X' → 'ONE' and 'A' ↔ 'Y' → 'TWO' map Dataset A value 'A' to different canonical values");
     expect(() => mappingOf([row("ONE", "A", "X"), row("TWO", "B", "X")]))
-      .toThrow(/ambiguous right alias 'X' between canonical entries 'ONE' and 'TWO'/);
+      .toThrow("rows 'A' ↔ 'X' → 'ONE' and 'B' ↔ 'X' → 'TWO' map Dataset B value 'X' to different canonical values");
   });
 
   it("deduplicates identical rows and repeated aliases within one row", () => {

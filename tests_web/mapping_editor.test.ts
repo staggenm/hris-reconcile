@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ObservedPair } from "../src/web/analysis/mapping_analysis";
-import { buildContract } from "../src/web/core/contract_builder";
+import { buildContract, ValueMappingSelection } from "../src/web/core/contract_builder";
 import {
   inputFromValue,
   MappingEditorRow,
@@ -12,6 +12,10 @@ import {
 const pair = (left_value: string | null, right_value: string | null, suggested = true): ObservedPair => ({
   left_value, right_value, count: 2, matched_percentage: 50, consistency_percentage: 100, suggested,
 });
+const contractWith = (value_mappings: ValueMappingSelection[]) => ({
+  contract_name: "c", left_name: "a", right_name: "b", left_identity: "id", right_identity: "id",
+  fields: [{ left_column: "status", right_column: "status", mode: "Value mapping" as const, value_mappings }],
+});
 const row = (left: string | null, right: string | null, canonical: string, accepted = true): MappingEditorRow => ({
   left, right, canonical, accepted, count: 0, consistency_percentage: 0, assessment: "Manual",
 });
@@ -19,10 +23,28 @@ const row = (left: string | null, right: string | null, canonical: string, accep
 describe("mapping editor data model", () => {
   it("stores raw evidence values, including null, without display sentinels", () => {
     const rows = rowsFromEvidence([pair("DE01", "1000"), pair(null, "2000", false)]);
-    expect(rows.map((item) => [item.left, item.right, item.canonical, item.accepted, item.assessment])).toEqual([
-      ["DE01", "1000", "CANONICAL_001", true, "High confidence"],
-      [null, "2000", "CANONICAL_002", false, "Review"],
+    expect(rows.map((item) => [item.left, item.right, item.accepted, item.assessment])).toEqual([
+      ["DE01", "1000", true, "High confidence"],
+      [null, "2000", false, "Review"],
     ]);
+  });
+
+  it("defaults the canonical value to the Dataset B value, falling back to Dataset A", () => {
+    const rows = rowsFromEvidence([pair("DE01", "1000"), pair("FT", null, false), pair(null, null, false)]);
+    expect(rows.map((item) => item.canonical)).toEqual(["1000", "FT", ""]);
+  });
+
+  it("accepts N:1 evidence with default canonicals and no manual edits", () => {
+    const rows = rowsFromEvidence([pair("FT", "Full"), pair("F", "Full")]);
+    expect(buildContract(contractWith(selectionsFromRows("status", rows))).valueMappings.field_1_status)
+      .toEqual({ Full: { left: ["FT", "F"], right: ["Full"] } });
+  });
+
+  it("names the field and the conflicting rows for a genuine 1:N conflict", () => {
+    const rows = rowsFromEvidence([pair("FT", "Full"), pair("FT", "Full time")]);
+    expect(() => buildContract(contractWith(selectionsFromRows("status", rows)))).toThrow(
+      "value mapping for field 'status': rows 'FT' ↔ 'Full' → 'Full' and 'FT' ↔ 'Full time' → 'Full time' map Dataset A value 'FT' to different canonical values",
+    );
   });
 
   it("maps empty input to null and preserves every other string exactly", () => {
@@ -52,10 +74,7 @@ describe("mapping editor data model", () => {
 
   it("lets rows share a canonical value so the contract groups them", () => {
     const selections = selectionsFromRows("status", [row("FT", "Full", "FULL"), row("F", "Full", "FULL")]);
-    const contract = buildContract({
-      contract_name: "c", left_name: "a", right_name: "b", left_identity: "id", right_identity: "id",
-      fields: [{ left_column: "status", right_column: "status", mode: "Value mapping", value_mappings: selections }],
-    });
+    const contract = buildContract(contractWith(selections));
     expect(contract.valueMappings.field_1_status).toEqual({ FULL: { left: ["FT", "F"], right: ["Full"] } });
   });
 });

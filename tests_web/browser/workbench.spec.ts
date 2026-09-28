@@ -166,7 +166,8 @@ test("main controls respond while a worker result is pending and reset discards 
 
 test("capture synthetic desktop and narrow workflow screenshots", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "capture one set of cross-browser review images");
-  const output = resolve(root, "docs/reviews/html_conversion_screenshots");
+  // Screenshots are review artefacts, never tracked files: tests must not modify the working tree.
+  const output = resolve(root, "test-results/screenshots");
   mkdirSync(output, { recursive: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(artifact);
@@ -250,4 +251,21 @@ test("identity normalizers match leading-zero keys and blank identities are coun
   await expect(page.locator("#step-results")).toBeHidden();
   await expect(page.locator("#step-fields")).toBeHidden();
   expect(errors).toEqual([]);
+});
+
+test("N:1 mapping rows are accepted with their default canonical values", async ({ page }) => {
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from("person_id,status\n001,FT\n002,F\n003,FT\n004,F\n") });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from("employee_number,status\n001,Full\n002,Full\n003,Full\n004,Full\n") });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#field-rows select").nth(2).selectOption("Value mapping");
+  await page.locator("#confirm-fields").click();
+  await expect(page.locator("#mapping-editors tbody tr")).toHaveCount(2);
+  for (const checkbox of await page.locator("#mapping-editors input[type=checkbox]").all()) await checkbox.check();
+  await page.locator("#confirm-mappings").click();
+  await expect(page.locator("#error")).toBeHidden();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  expect(await metric(page, "Field matches")).toBe("4");
+  expect(await metric(page, "Field discrepancies")).toBe("0");
 });
