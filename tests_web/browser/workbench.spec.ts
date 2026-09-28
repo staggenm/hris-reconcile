@@ -599,3 +599,45 @@ test("worker operations show progress, set aria-busy, and disable actions until 
   await expect(page.locator("#busy")).toBeHidden();
   await expect(page.locator("#run-reconciliation")).toBeEnabled();
 });
+
+test("accessibility: focus moves to the next step, tables have captions and scopes, drops are checked, errors stay in view", async ({ page }) => {
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv) });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightRichCsv + "003,Linus,9999\n") });
+  await page.locator("#confirm-identity").click();
+  await expect(page.locator("#step-fields-title")).toBeFocused();
+  await expect(page.locator("#step-fields-title")).toHaveAttribute("tabindex", "-1");
+  await page.locator("#confirm-fields").click();
+  await expect(page.locator("#step-mappings-title")).toBeFocused();
+  await page.locator("#confirm-mappings").click();
+  await expect(page.locator("#step-run-title")).toBeFocused();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results-title")).toBeFocused();
+  await expect(page.locator("#detail-summary table")).toBeVisible();
+
+  const tables = await page.locator("table").evaluateAll((all) => all
+    .filter((table) => (table as HTMLElement).offsetParent !== null || table.closest("details"))
+    .map((table) => ({
+      caption: table.querySelector("caption")?.textContent?.trim() ?? "",
+      unscoped: Array.from(table.querySelectorAll("thead th")).filter((th) => th.getAttribute("scope") !== "col").length,
+    })));
+  expect(tables.length).toBeGreaterThan(4);
+  for (const table of tables) {
+    expect(table.caption.length, JSON.stringify(table)).toBeGreaterThan(0);
+    expect(table.unscoped).toBe(0);
+  }
+
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const scrolled = await page.evaluate(() => window.scrollY);
+  await page.locator("#left-card").evaluate((element) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(["x"], "notes.txt", { type: "text/plain" }));
+    element.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  });
+  await expect(page.locator("#error")).toHaveAttribute("data-code", "FILE_TYPE");
+  await expect(page.locator("#error")).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+  await expect(page.locator("#step-results")).toBeVisible();
+  await page.locator("#error").getByRole("button", { name: "Dismiss" }).click();
+  await expect(page.locator("#error")).toBeHidden();
+});

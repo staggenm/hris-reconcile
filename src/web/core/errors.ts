@@ -1,6 +1,7 @@
 // The error-code catalogue. Codes are stable identifiers shown in the UI and
 // carried across the worker boundary; messages may change, codes may not.
 export const ERROR_CATALOGUE = {
+  FILE_TYPE: "The chosen or dropped file is not a CSV file.",
   CSV_EMPTY: "The CSV file has no header or no data rows.",
   CSV_ENCODING: "The file is not valid text in the selected encoding.",
   CSV_HEADER: "The CSV header is missing or contains an empty column name.",

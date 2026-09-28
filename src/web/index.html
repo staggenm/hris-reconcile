@@ -50,7 +50,7 @@
     <section id="step-upload" class="step" aria-labelledby="step-upload-title">
       <div class="step-number">1</div>
       <div class="step-body">
-        <h2 id="step-upload-title">Upload datasets</h2>
+        <h2 id="step-upload-title" tabindex="-1">Upload datasets</h2>
         <p>Choose or drop two CSV exports to compare. Only the first five rows are previewed.</p>
         <div class="two-column">
           <div id="left-card" class="dataset-card">
@@ -72,7 +72,7 @@
     <section id="step-identity" class="step hidden" aria-labelledby="step-identity-title">
       <div class="step-number">2</div>
       <div class="step-body">
-        <h2 id="step-identity-title">Match employees</h2>
+        <h2 id="step-identity-title" tabindex="-1">Match employees</h2>
         <p>Which fields identify the same employee in both datasets?</p>
         <div id="identity-suggestion" class="message"></div>
         <div class="identity-grid">
@@ -96,9 +96,9 @@
     <section id="step-fields" class="step hidden" aria-labelledby="step-fields-title">
       <div class="step-number">3</div>
       <div class="step-body">
-        <h2 id="step-fields-title">Match fields</h2>
+        <h2 id="step-fields-title" tabindex="-1">Match fields</h2>
         <p>Suggestions are advisory. Exact comparison is the default.</p>
-        <div class="table-scroll"><table><thead><tr><th>Dataset A field</th><th>Dataset B field</th><th>Mode</th><th></th></tr></thead><tbody id="field-rows"></tbody></table></div>
+        <div class="table-scroll"><table><caption class="sr-only">Field matches between Dataset A and Dataset B</caption><thead><tr><th scope="col">Dataset A field</th><th scope="col">Dataset B field</th><th scope="col">Mode</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="field-rows"></tbody></table></div>
         <div class="actions"><button id="add-field" class="secondary">Add row</button><button id="confirm-fields">Confirm field mappings</button></div>
         <span id="fields-confirmed" class="success hidden" role="status" aria-live="polite">Field mappings confirmed.</span>
       </div>
@@ -107,7 +107,7 @@
     <section id="step-mappings" class="step hidden" aria-labelledby="step-mappings-title">
       <div class="step-number">4</div>
       <div class="step-body">
-        <h2 id="step-mappings-title">Review value mappings</h2>
+        <h2 id="step-mappings-title" tabindex="-1">Review value mappings</h2>
         <p>Observed pairs are advisory. Accept only representation differences you confirm as semantically equivalent.</p>
         <div id="mapping-editors"></div>
         <button id="confirm-mappings">Confirm accepted semantic mappings</button>
@@ -118,7 +118,7 @@
     <section id="step-run" class="step hidden" aria-labelledby="step-run-title">
       <div class="step-number">5</div>
       <div class="step-body">
-        <h2 id="step-run-title">Run comparison</h2>
+        <h2 id="step-run-title" tabindex="-1">Run comparison</h2>
         <label>Reconciliation name<input id="contract-name" type="text"></label>
         <p id="run-summary" class="caption"></p>
         <div class="actions"><button id="run-reconciliation">Run reconciliation</button><button id="save-contract" class="secondary">Save contract (JSON)</button></div>
@@ -128,7 +128,7 @@
     <section id="step-results" class="step hidden" aria-labelledby="step-results-title">
       <div class="step-number">6</div>
       <div class="step-body">
-        <h2 id="step-results-title">Explore discrepancies</h2>
+        <h2 id="step-results-title" tabindex="-1">Explore discrepancies</h2>
         <div id="metrics" class="metrics"></div>
         <h3>Identity issues</h3>
         <div id="identity-issues"></div>

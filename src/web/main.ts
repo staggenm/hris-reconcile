@@ -23,7 +23,8 @@ import {
 } from "./ui/mapping_editor";
 import { busyLabel } from "./ui/busy";
 import { metricTiles } from "./ui/metrics";
-import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, invalidationNote, Progress, reach, STEP_IDS, stepStates } from "./ui/steps";
+import { assertCsvFile } from "./ui/files";
+import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, invalidationNote, Progress, reach, STEP_IDS, StepId, stepStates } from "./ui/steps";
 import { onBusyChange, onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
 import {
   ComparisonMode,
@@ -130,13 +131,21 @@ function edit(kind: EditKind): void {
 }
 
 function showError(error: unknown): void {
+  // The banner is sticky, so it is visible wherever the user is; the page does not jump.
   const target = $("#error");
   const code = errorCodeOf(error);
   const message = error instanceof Error ? error.message : String(error);
   target.dataset.code = code;
-  target.replaceChildren(node("span", code, "error-code"), document.createTextNode(` ${message}`));
+  const dismiss = node("button", "Dismiss", "error-dismiss secondary");
+  dismiss.type = "button";
+  dismiss.addEventListener("click", clearError);
+  target.replaceChildren(node("span", code, "error-code"), node("span", message, "error-message"), dismiss);
   target.classList.remove("hidden");
-  target.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+// After a step is confirmed, keyboard and screen-reader focus moves to the next step's heading.
+function focusStep(step: StepId): void {
+  $(`#step-${step}-title`).focus();
 }
 
 function clearError(): void {
@@ -163,11 +172,16 @@ interface TableColumn<T> {
   value: (row: T) => unknown;
 }
 
-function renderTable<T>(columns: TableColumn<T>[], rows: T[]): HTMLDivElement {
+function renderTable<T>(columns: TableColumn<T>[], rows: T[], caption: string): HTMLDivElement {
   const wrapper = node("div", "", "table-scroll");
   const table = node("table");
+  table.append(node("caption", caption, "sr-only"));
   const header = node("tr");
-  for (const column of columns) header.append(node("th", column.label));
+  for (const column of columns) {
+    const th = node("th", column.label);
+    th.scope = "col";
+    header.append(th);
+  }
   const head = node("thead");
   head.append(header);
   const body = node("tbody");
@@ -197,6 +211,8 @@ function invalidateAfterUpload(): void {
 
 async function upload(side: "left" | "right", file: File, kind: EditKind = `${side}-file`): Promise<void> {
   clearError();
+  // Checked before anything is reset, so a wrong drop never discards the session.
+  assertCsvFile(file.name, file.type);
   chosenFiles[side] = file;
   const session = sessionGeneration;
   const request = ++uploadGeneration[side];
@@ -268,6 +284,7 @@ function renderDataset(
         value: (row: Record<string, string | null>) => row[col],
       })),
       previewRows,
+      `Preview of ${filename}`,
     ),
   );
 
@@ -285,6 +302,7 @@ function renderDataset(
         { label: "Samples", value: (r) => r.sample_values.join(", ") },
       ],
       profiles,
+      `Column profile of ${filename}`,
     ),
   );
   target.append(details);
@@ -374,6 +392,7 @@ function confirmIdentity(): void {
 
   renderFieldRows();
   setProgress(confirmStep(progress, "identity"));
+  focusStep("fields");
 }
 
 function renderFieldRows(): void {
@@ -471,6 +490,7 @@ function confirmFields(): void {
   }
 
   setProgress(confirmStep(progress, "fields"));
+  focusStep("mappings");
   void renderMappingEditors().catch(showError);
 }
 
@@ -546,8 +566,13 @@ function mappingTable(editor: MappingEditorState): HTMLDivElement {
     "Assessment",
     "",
   ];
+  table.append(node("caption", `Value mappings for ${editor.field.left_column} ↔ ${editor.field.right_column}`, "sr-only"));
   const headRow = node("tr");
-  headings.forEach((value) => headRow.append(node("th", value)));
+  headings.forEach((value) => {
+    const th = node("th", value);
+    th.scope = "col";
+    headRow.append(th);
+  });
   const head = node("thead");
   head.append(headRow);
   const body = node("tbody");
@@ -655,6 +680,7 @@ function confirmMappings(): void {
     return;
   }
   setProgress(confirmStep(progress, "mappings"));
+  focusStep("run");
 }
 
 function buildCurrentContract(): ReconciliationContract {
@@ -697,7 +723,7 @@ async function runReconciliation(): Promise<void> {
   $("#matching-summary").replaceChildren(node("p", `${dashboard.matchingCount.toLocaleString()} matching comparisons. Expand to load details.`, "caption"));
 
   setProgress(confirmStep(progress, "run"));
-  $("#step-results").scrollIntoView({ behavior: "smooth" });
+  focusStep("results");
 }
 
 async function loadIdentityIssues(pageNumber: number): Promise<void> {
@@ -804,6 +830,7 @@ function renderFieldSummary(rows: FieldMismatchSummary[]): void {
         { label: "Rate %", value: (row) => row.mismatch_rate_percentage },
       ],
       rows,
+      "Mismatches by field",
     ),
   );
 
@@ -821,7 +848,7 @@ function renderFieldSummary(rows: FieldMismatchSummary[]): void {
 function loadRemoteTable<T>(columns: TableColumn<T>[], page: WorkerPage<T>, label: string, onPage: (page: number) => void): HTMLDivElement {
   const container = node("div", "", "paged-table");
   container.append(node("p", `${label}: ${page.total.toLocaleString()} · page ${page.page + 1} of ${Math.max(1, Math.ceil(page.total / page.pageSize))}`, "caption"));
-  container.append(renderTable(columns, page.rows));
+  container.append(renderTable(columns, page.rows, label));
   const controls = node("div", "", "actions");
   const previous = node("button", "Previous page", "secondary");
   previous.type = "button"; previous.disabled = page.page === 0;
