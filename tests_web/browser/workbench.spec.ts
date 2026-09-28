@@ -548,6 +548,7 @@ test("theme: system fonts, light and dark tokens, sticky tabular tables, chevron
 
   await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv) });
   await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightRichCsv + "003,Linus,9999\n") });
+  await expect(page.locator("#step-identity")).toHaveAttribute("data-state", "active");
   expect(await page.locator("#left-identity").evaluate((el) => getComputedStyle(el).backgroundImage)).toMatch(/^url\("data:image\/svg\+xml/);
   await page.locator("#confirm-identity").click();
   await page.locator("#confirm-fields").click();
@@ -563,4 +564,38 @@ test("theme: system fonts, light and dark tokens, sticky tabular tables, chevron
   const toneColor = (tone: string) => page.locator(`.metric[data-tone="${tone}"]`).first().evaluate((el) => getComputedStyle(el, "::before").backgroundColor);
   expect(await toneColor("bad")).not.toBe(await toneColor("ok"));
   expect(await page.locator("#step-upload .step-number").evaluate((el) => getComputedStyle(el, "::after").maskImage || getComputedStyle(el, "::after").webkitMaskImage)).toMatch(/data:image\/svg\+xml/);
+});
+
+test("worker operations show progress, set aria-busy, and disable actions until done", async ({ page }) => {
+  await page.addInitScript(() => {
+    const add = Worker.prototype.addEventListener;
+    Worker.prototype.addEventListener = function (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) {
+      if (type === "message" && typeof listener === "function") {
+        const delayed = function (this: Worker, event: Event) { window.setTimeout(() => listener.call(this, event), 600); };
+        return add.call(this, type, delayed as EventListener, options);
+      }
+      return add.call(this, type, listener, options);
+    };
+  });
+  await page.goto(artifact);
+  await expect(page.locator("#busy")).toBeHidden();
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftCsv) });
+  await expect(page.locator("#busy")).toContainText("Reading and profiling the file…");
+  await expect(page.locator("main")).toHaveAttribute("aria-busy", "true");
+  await expect(page.locator("#busy [role=progressbar]")).toBeVisible();
+  await expect(page.locator("#busy")).toBeHidden();
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightCsv) });
+  await expect(page.locator("#busy")).toContainText("Suggesting employee identity fields…");
+  await expect(page.locator("#busy")).toBeHidden();
+  await expect(page.locator("main")).not.toHaveAttribute("aria-busy", "true");
+  await page.locator("#confirm-identity").click();
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#busy")).toContainText("Reconciling…");
+  await expect(page.locator("#run-reconciliation")).toBeDisabled();
+  await expect(page.locator("#clear-session")).toBeEnabled();
+  await expect(page.locator("#step-results")).toBeVisible();
+  await expect(page.locator("#busy")).toBeHidden();
+  await expect(page.locator("#run-reconciliation")).toBeEnabled();
 });

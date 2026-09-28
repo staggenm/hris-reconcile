@@ -6,6 +6,7 @@ import { FieldMismatchSummary, ResultsSummary } from "./analysis/results_analysi
 import { DatasetSummary, ReconciliationContract } from "./core/types";
 
 interface PendingRequest {
+  type: string;
   sessionGeneration: number;
   responseType: string;
   resolve: (result: unknown) => void;
@@ -30,6 +31,16 @@ export const WORKER_CRASHED_MESSAGE = "Processing stopped (likely memory). Sessi
 
 let worker: Worker | null = null;
 let crashListener: ((error: AppError) => void) | null = null;
+let busyListener: ((pendingTypes: string[]) => void) | null = null;
+
+// Called whenever the set of pending requests changes (oldest first).
+export function onBusyChange(listener: (pendingTypes: string[]) => void): void {
+  busyListener = listener;
+}
+
+function notifyBusy(): void {
+  busyListener?.(Array.from(pending.values(), (request) => request.type));
+}
 
 // Called once per crash, after pending requests have been rejected.
 export function onWorkerCrash(listener: (error: AppError) => void): void {
@@ -41,6 +52,7 @@ const pending = new Map<number, PendingRequest>();
 function failPending(error: Error): void {
   for (const request of pending.values()) request.reject(error);
   pending.clear();
+  notifyBusy();
 }
 
 function getWorker(): Worker {
@@ -58,6 +70,7 @@ function getWorker(): Worker {
     const request = pending.get(message.requestId);
     if (!request) return;
     pending.delete(message.requestId);
+    notifyBusy();
     if (request.sessionGeneration !== message.sessionGeneration) return;
     if (message.type !== request.responseType) {
       request.reject(deserializeError(message.error ?? { message: "reconciliation worker failed", code: "UNKNOWN" }));
@@ -86,15 +99,18 @@ function requestWorker<T>(type: string, options: Record<string, unknown>, sessio
   const requestId = nextRequestId++;
   return new Promise((resolve, reject) => {
     pending.set(requestId, {
+      type,
       sessionGeneration,
       responseType: `${type}-result`,
       resolve: (value) => resolve(value as T),
       reject,
     });
+    notifyBusy();
     try {
       instance.postMessage({ type, requestId, sessionGeneration, ...options }, transfer);
     } catch (error) {
       pending.delete(requestId);
+      notifyBusy();
       reject(error instanceof Error ? error : new AppError("UNKNOWN", String(error)));
     }
   });

@@ -21,9 +21,10 @@ import {
   selectionsFromRows,
   valueFromInput,
 } from "./ui/mapping_editor";
+import { busyLabel } from "./ui/busy";
 import { metricTiles } from "./ui/metrics";
 import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, invalidationNote, Progress, reach, STEP_IDS, stepStates } from "./ui/steps";
-import { onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
+import { onBusyChange, onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
 import {
   ComparisonMode,
   DatasetSummary,
@@ -1072,6 +1073,29 @@ $("#contract-file").addEventListener("change", (event) => {
   input.value = "";
   clearError();
   if (file) loadContract(file).catch(showError);
+});
+
+// While worker requests are pending: show progress, mark the workbench busy,
+// and disable its action buttons (header controls such as Clear session stay
+// usable, so a slow run can always be abandoned).
+onBusyChange((pendingTypes) => {
+  const label = busyLabel(pendingTypes);
+  const main = $("main");
+  show("#busy", label !== null);
+  $("#busy-label").textContent = label ?? "";
+  if (label) {
+    main.setAttribute("aria-busy", "true");
+    for (const button of main.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")) {
+      button.disabled = true;
+      button.dataset.busyDisabled = "true";
+    }
+  } else {
+    main.removeAttribute("aria-busy");
+    for (const button of main.querySelectorAll<HTMLButtonElement>("button[data-busy-disabled]")) {
+      button.disabled = false;
+      delete button.dataset.busyDisabled;
+    }
+  }
 });
 
 // The worker held every dataset and result, so the whole session is gone:
