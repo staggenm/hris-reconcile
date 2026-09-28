@@ -165,36 +165,82 @@ test("main controls respond while a worker result is pending and reset discards 
   await expect(page.locator("#metrics")).toBeEmpty();
 });
 
-test("capture synthetic desktop and narrow workflow screenshots", async ({ page, browserName }) => {
-  test.skip(browserName !== "chromium", "capture one set of cross-browser review images");
-  // Screenshots are review artefacts, never tracked files: tests must not modify the working tree.
-  const output = resolve(root, "test-results/screenshots");
-  mkdirSync(output, { recursive: true });
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(artifact);
-  await page.waitForTimeout(300);
-  await page.locator("header").evaluate((header) => { (header as HTMLElement).style.position = "relative"; });
-  await page.screenshot({ path: resolve(output, "01-upload-desktop.png"), fullPage: true });
-  await page.locator("#left-file").setInputFiles({ name: "people.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv) });
-  await page.locator("#right-file").setInputFiles({ name: "payroll.csv", mimeType: "text/csv", buffer: Buffer.from(rightRichCsv) });
-  await expect(page.locator("#step-identity")).toBeVisible();
-  await page.waitForTimeout(250);
-  await page.screenshot({ path: resolve(output, "02-profiles-desktop.png"), fullPage: true });
-  await page.locator("#confirm-identity").click();
-  await page.locator("#field-rows select").nth(2).selectOption("Normalized text");
-  await page.locator("#field-rows select").nth(5).selectOption("Value mapping");
-  await page.locator("#confirm-fields").click();
-  await expect(page.locator("#mapping-editors input[type=text]").nth(1)).toHaveValue("DE01");
-  await page.screenshot({ path: resolve(output, "03-mappings-desktop.png"), fullPage: true });
-  await page.locator("#confirm-mappings").click();
-  await page.locator("#run-reconciliation").click();
-  await expect(page.locator("#step-results")).toBeVisible();
-  await page.waitForTimeout(250);
-  await page.waitForTimeout(250);
-  await page.screenshot({ path: resolve(output, "04-results-desktop.png"), fullPage: true });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: resolve(output, "05-results-narrow.png"), fullPage: true });
-});
+for (const colorScheme of ["light", "dark"] as const) {
+  for (const [viewportName, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]] as const) {
+    test(`review screenshots: ${colorScheme} ${viewportName}`, async ({ page, browserName }) => {
+      test.skip(browserName !== "chromium", "one engine is enough for review images");
+      // Screenshots are review artefacts, never tracked files: tests must not modify the working tree.
+      const output = resolve(root, "test-results/screenshots");
+      mkdirSync(output, { recursive: true });
+      let shot = 0;
+      const capture = async (name: string) => {
+        await page.waitForTimeout(350);
+        // Full-page captures only: off-screen completed steps use content-visibility:auto
+        // (painted when scrolled into view), and the sticky header would repeat mid-page.
+        // CSSOM changes, not an injected <style>, so the page CSP stays untouched.
+        await page.evaluate(() => {
+          for (const body of document.querySelectorAll<HTMLElement>(".step-body")) body.style.contentVisibility = "visible";
+          document.querySelector<HTMLElement>("header")!.style.position = "relative";
+        });
+        shot++;
+        await page.screenshot({ path: resolve(output, `${colorScheme}-${viewportName}-${String(shot).padStart(2, "0")}-${name}.png`), fullPage: true });
+      };
+      await page.addInitScript(() => {
+        const violations: string[] = [];
+        Object.defineProperty(window, "__cspViolations", { value: violations });
+        document.addEventListener("securitypolicyviolation", (event) => violations.push(event.violatedDirective));
+      });
+      await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+      await page.setViewportSize(viewport);
+      await page.goto(artifact);
+      await capture("upload-empty");
+      await page.locator("#left-file").setInputFiles({ name: "people.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv + "003,Linus,CH01\n,Nobody,DE01\n") });
+      await page.locator("#right-file").setInputFiles({ name: "payroll.csv", mimeType: "text/csv", buffer: Buffer.from(rightRichCsv + "003,Linus,9999\n004,Margaret,1000\n") });
+      await expect(page.locator("#step-identity")).toHaveAttribute("data-state", "active");
+      await capture("identity");
+      await page.locator("#confirm-identity").click();
+      await page.locator("#field-rows select").nth(2).selectOption("Normalized text");
+      await page.locator("#field-rows select").nth(5).selectOption("Value mapping");
+      await capture("fields");
+      await page.locator("#confirm-fields").click();
+      await expect(page.locator("#mapping-editors tbody tr")).toHaveCount(2);
+      await capture("mappings");
+      await page.locator("#confirm-mappings").click();
+      await expect(page.locator("#step-run")).toHaveAttribute("data-state", "active");
+      await capture("run");
+      await page.locator("#run-reconciliation").click();
+      await expect(page.locator("#detail-summary table")).toBeVisible();
+      await capture("results");
+      await page.locator("#result-pair").selectOption("0");
+      await page.locator("#matching-details summary").click();
+      await expect(page.locator("#matching-summary table")).toBeVisible();
+      await capture("results-drilldown");
+      await page.locator("#mapping-editors input[type=text]").nth(0).fill("GERMANY");
+      await page.locator("#mapping-editors input[type=text]").nth(0).blur();
+      await expect(page.locator("#step-mappings")).toHaveAttribute("data-state", "stale");
+      await page.locator("#step-mappings").scrollIntoViewIfNeeded();
+      await capture("stale-reset-note");
+      await page.locator("#left-card").evaluate((element) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File(["x"], "notes.txt", { type: "text/plain" }));
+        element.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      });
+      await expect(page.locator("#error")).toBeVisible();
+      await page.waitForTimeout(350);
+      await page.screenshot({ path: resolve(output, `${colorScheme}-${viewportName}-${String(++shot).padStart(2, "0")}-error-toast.png`) });
+      await page.locator("#error").getByRole("button", { name: "Dismiss" }).click();
+      await page.locator("#clear-session").click();
+      const golden = resolve(root, "tests_web/fixtures/golden/status_matrix");
+      await page.locator("#left-file").setInputFiles(resolve(golden, "left.csv"));
+      await page.locator("#right-file").setInputFiles(resolve(golden, "right.csv"));
+      await expect(page.locator("#step-identity")).toHaveAttribute("data-state", "active");
+      await page.locator("#contract-file").setInputFiles(resolve(golden, "contract.json"));
+      await expect(page.locator("#contract-summary")).toBeVisible();
+      await capture("custom-contract-summary");
+      expect(await page.evaluate(() => (window as any).__cspViolations)).toEqual([]);
+    });
+  }
+}
 
 async function mappingRows(page: import("@playwright/test").Page) {
   return page.locator("#mapping-editors tbody tr").evaluateAll((rows) =>

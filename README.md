@@ -127,6 +127,17 @@ a field that also has semantic exceptions.
 
 Synthetic sample inputs are in `examples/core_hr_vs_payroll/`.
 
+The interface follows the design reference in `docs/design/theme-reference.css`
+(system font stack, light and dark via `prefers-color-scheme`). Step state
+(`data-state`: done / active / stale) and result tones (`data-tone`) are set by
+pure, unit-tested modules in `src/web/ui/`. An edit that invalidates later steps
+marks its step stale and says why ("Results reset because the value mappings
+changed."). Worker operations show a progress toast and set `aria-busy`. Focus
+moves to the next step's heading after each confirmation, every table has a
+caption, and errors appear as a dismissible toast with their code. Review
+screenshots of every step (light/dark, desktop/390 px) are written to
+`test-results/screenshots/` by the Playwright suite.
+
 Available comparison modes are **Exact** (byte-exact), **Normalized text**
 (Unicode NFC, trim, collapse whitespace, casefold), **Value mapping**, and
 **Ignore**.

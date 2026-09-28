@@ -362,7 +362,7 @@ async function scoreIdentity(kind: EditKind): Promise<void> {
 
   $("#identity-evidence").textContent = `Conservative trimmed/case-insensitive value overlap for selection: ${evidence.overlap_percentage.toFixed(
     1,
-  )}%. Reconciliation matches identities exactly unless identity normalization is selected below.`;
+  )}%. Reconciliation matches identities exactly unless identity normalization is selected.`;
 }
 
 function identityNormalizerInputs(): HTMLInputElement[] {

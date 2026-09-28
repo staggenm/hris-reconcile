@@ -569,7 +569,6 @@ button:disabled { opacity: .45; cursor: not-allowed; filter: none; box-shadow: n
   white-space: nowrap;
   border: 0;
 }
-.contract-picker { margin: 4px 12px 16px 0; }
 .contract-summary {
   margin: 4px 0 20px;
   padding: 16px 18px;
@@ -590,7 +589,8 @@ button.secondary:hover, .file-picker.secondary:hover { filter: none; background:
 button.danger { color: var(--bad); }
 button.danger:hover { background: var(--bad-soft); border-color: var(--bad-border); }
 
-.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
+.actions .success { margin-left: 2px; }
 
 /* ---------- Identity ---------- */
 .identity-grid {
@@ -628,6 +628,10 @@ button.danger:hover { background: var(--bad-soft); border-color: var(--bad-borde
   scrollbar-color: var(--border-strong) transparent;
 }
 .caption + .table-scroll, .table-scroll + .caption { margin-top: 8px; }
+.paged-table { margin-bottom: 20px; }
+#pair-panel > label { margin-top: 20px; }
+#mapping-editors .table-scroll + button { margin-top: 12px; }
+#confirm-mappings { margin-top: 20px; }
 
 table {
   width: 100%;
@@ -659,7 +663,7 @@ tbody tr:last-child td { border-bottom: 0; }
 /* Data values read better in mono. */
 .paged-table td, .dataset-card td { font-family: var(--mono); font-size: 12.5px; }
 
-td input, td select { min-width: 128px; min-height: 34px; padding-top: 5px; padding-bottom: 5px; font-size: 13px; }
+td input[type="text"], td select { min-width: 128px; min-height: 34px; padding-top: 5px; padding-bottom: 5px; font-size: 13px; }
 td button { min-height: 32px; padding: 5px 12px; font-size: 12.5px; }
 
 /* ---------- Metrics (tone from data-tone) ---------- */
