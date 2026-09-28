@@ -1,5 +1,5 @@
 import { AppError } from "./errors";
-import { checkComparisons, Limits } from "./limits";
+import { checkComparisons, checkDiscrepancies, Limits } from "./limits";
 import { emptyFieldCounts, isDiscrepancy } from "./status";
 import { compareFieldWithResolver } from "./comparator";
 import { compareCodePoints } from "./compare";
@@ -96,7 +96,10 @@ export class ReconciliationEngine {
     const discrepancies: FieldComparisonResult[] = [];
     for (const comparison of compareAll()) {
       fieldCounts.get(comparison.fieldName)![comparison.status]++;
-      if (isDiscrepancy(comparison)) discrepancies.push(comparison);
+      if (isDiscrepancy(comparison)) {
+        discrepancies.push(comparison);
+        checkDiscrepancies(discrepancies.length, options.limits);
+      }
     }
 
     return {

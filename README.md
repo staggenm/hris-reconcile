@@ -232,12 +232,16 @@ CSV/JSON reports. It does not yet support:
 
 Volume limits (`src/web/core/limits.ts`) are checked before work starts: the
 file size before reading, rows and columns after parsing, and the estimated
-comparisons (smaller row count × fields) before reconciling. Current values are
-50 MB per file, 200,000 rows, 200 columns, and 5,000,000 comparisons. They are
-**provisional** until confirmed with `npm run bench`, which is not part of
-verify or CI. That command builds a copy without limits, runs synthetic 10k /
-100k / 200k-row × 30-field datasets through Chromium, and writes timings and
-peak heap to `test-results/bench/`.
+comparisons (smaller row count × fields) before reconciling. While
+reconciling, a run stops early once it has stored more differences than the
+limit (`LIMIT_DISCREPANCIES`), which almost always means the identity field or
+value mappings are wrong. The limits are 100 MB per file, 200,000 rows, 200
+columns, 8,000,000 cells (rows × columns) per file, 6,000,000 comparisons,
+and 1,500,000 stored differences. They are based on `npm run bench` (the
+figures are in `src/web/core/limits.ts`), which is not part of verify or CI.
+That command builds a copy without limits, runs synthetic 10k / 100k /
+200k-row × 30-field datasets through Chromium, and writes timings, peak and
+retained heap, and export sizes to `test-results/bench/`.
 
 CSV empty cells become explicit nulls. Identity fields receive no implicit
 normalization. If an identity is duplicated, it is reported and excluded from

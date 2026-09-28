@@ -341,18 +341,18 @@ test("errors show their stable code next to the message", async ({ page }) => {
 });
 
 test("a file over the size limit is rejected before it is read", async ({ page, browserName }) => {
-  test.skip(browserName !== "chromium", "one engine is enough for a 50 MB upload");
+  test.skip(browserName !== "chromium", "one engine is enough for a 100 MB upload");
   await page.goto(artifact);
   const directory = mkdtempSync(resolve(tmpdir(), "hris-big-"));
   const oversized = resolve(directory, "big.csv");
-  writeFileSync(oversized, Buffer.alloc(50 * 1024 * 1024 + 1, "a"));
+  writeFileSync(oversized, Buffer.alloc(100 * 1024 * 1024 + 1, "a"));
   try {
     await page.locator("#left-file").setInputFiles(oversized);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
   await expect(page.locator("#error")).toHaveAttribute("data-code", "LIMIT_FILE_SIZE");
-  await expect(page.locator("#error")).toContainText("file 'big.csv' is 50.0 MB; the limit is 50.0 MB");
+  await expect(page.locator("#error")).toContainText("file 'big.csv' is 100.0 MB; the limit is 100.0 MB");
   await expect(page.locator("#left-dataset")).toBeEmpty();
 });
 

@@ -27,8 +27,36 @@ const contract: ReconciliationContract = {
 };
 
 describe("volume limits", () => {
-  it("has provisional defaults of 50 MB, 200k rows, 200 columns, and 5M comparisons", () => {
-    expect(DEFAULT_LIMITS).toEqual({ maxFileBytes: 50 * 1024 * 1024, maxRows: 200_000, maxColumns: 200, maxComparisons: 5_000_000 });
+  it("has the benchmarked defaults", () => {
+    expect(DEFAULT_LIMITS).toEqual({
+      maxFileBytes: 100 * 1024 * 1024, maxRows: 200_000, maxColumns: 200, maxCells: 8_000_000,
+      maxComparisons: 6_000_000, maxDiscrepancies: 1_500_000,
+    });
+  });
+
+  it("checks cells (rows × columns) per file after parsing", () => {
+    expect(parseCsvContent("a,b\n1,2\n3,4\n", "x", { limits: limits({ maxCells: 4 }) }).records).toHaveLength(2);
+    const error = thrown(() => parseCsvContent("a,b\n1,2\n3,4\n5,6\n", "x", { limits: limits({ maxCells: 4 }) }));
+    expect([error.code, error.message]).toEqual(["LIMIT_CELLS", "dataset 'x' has 6 cells (3 rows × 2 columns); the limit is 4"]);
+  });
+
+  it("aborts reconciliation as soon as stored discrepancies exceed the limit", () => {
+    const differing = (name: string) => dataset(name, 10);
+    const left = differing("l");
+    const right = differing("r");
+    right.records.forEach((record, i) => { record.a = `other ${i}`; });
+    // Records past the first few must never be compared if the run aborts early.
+    right.records = right.records.map((record, i) => i < 4 ? record : new Proxy(record, {
+      get(target, key) {
+        if (key === "a" || key === "b") throw new AppError("INTERNAL", `record ${i} compared after the limit was reached`);
+        return target[key as string];
+      },
+    }));
+    const error = thrown(() => new ReconciliationEngine().reconcile({ contract, leftDataset: left, rightDataset: right, limits: limits({ maxDiscrepancies: 3 }) }));
+    expect([error.code, error.message]).toEqual([
+      "LIMIT_DISCREPANCIES",
+      "Too many differences. This usually means the identity field or value mappings are wrong. Check the configuration before rerunning.",
+    ]);
   });
 
   it("checks the file size before reading", () => {

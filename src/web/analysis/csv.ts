@@ -1,5 +1,5 @@
 import { AppError, ErrorCode } from "../core/errors";
-import { checkColumns, checkRows, DEFAULT_LIMITS, Limits } from "../core/limits";
+import { checkCells, checkColumns, checkRows, DEFAULT_LIMITS, Limits } from "../core/limits";
 import Papa from "papaparse";
 import { compareCodePoints } from "../core/compare";
 import { Dataset, RecordRow } from "../core/types";
@@ -185,6 +185,7 @@ export function parseCsvContent(
   }
 
   checkRows(name, records.length, limits);
+  checkCells(name, records.length, header.length, limits);
 
   return {
     name,
