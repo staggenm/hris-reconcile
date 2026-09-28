@@ -133,12 +133,17 @@ npm run test:browser   # builds, then Playwright on Chromium, Firefox, WebKit
 npm run verify         # the full CI pipeline (see below)
 ```
 
-`npm run verify` (also run by `.github/workflows/ci.yml`) runs typecheck,
-Vitest, build, a byte-compare of the build against the committed
-`dist/hris-reconcile.html`, and Playwright. It fails if any step changed the
-working tree. Run it after committing: the committed build must match the
-source. Tests never write to tracked files; review screenshots go to
-`test-results/`.
+The toolchain is pinned to Node 24.21.0 (`.nvmrc`, `engines`).
+
+`npm run verify` runs typecheck, Vitest, build, and Playwright, then checks that
+the fresh build equals the working-tree `dist/hris-reconcile.html` and that no
+step changed the working tree (ignoring `dist/`). Local flow: `npm run build` →
+`npm run verify` → commit.
+
+`npm run verify:ci` (run by `.github/workflows/ci.yml`, which reads `.nvmrc`)
+does the same but compares against the committed `dist/hris-reconcile.html`
+and requires a clean working tree. Tests never write to tracked files; review
+screenshots go to `test-results/`.
 
 Playwright browsers are a one-time development download:
 `npx playwright install chromium firefox webkit`. They are only for tests; the

@@ -1,13 +1,19 @@
 #!/usr/bin/env node
-// Full verification pipeline, used locally (`npm run verify`) and in CI:
-// typecheck → vitest → build → byte-compare dist with the committed build →
-// playwright → fail if the run changed the working tree.
+// Verification pipeline: typecheck → vitest → build → playwright → dist
+// comparison → working-tree check.
+//
+//   npm run verify     local: the fresh build must equal the working-tree
+//                      dist/hris-reconcile.html (flow: build → verify → commit);
+//                      the tree check ignores dist/.
+//   npm run verify:ci  CI: the fresh build must equal the committed dist, and
+//                      the working tree must be clean.
 import { spawnSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const ARTIFACT = "dist/hris-reconcile.html";
-const ci = Boolean(process.env.CI);
+const ci = process.argv.includes("--ci");
+const pathspec = ci ? ["."] : [".", ":(exclude)dist"];
 
 function git(...args) {
   return execFileSync("git", args, { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 });
@@ -17,9 +23,10 @@ function git(...args) {
 // file is detected too.
 function treeState() {
   const hash = createHash("sha256");
-  hash.update(git("status", "--porcelain=v1", "-z", "--untracked-files=all"));
-  hash.update(git("diff", "--binary", "HEAD"));
-  const untracked = git("ls-files", "--others", "--exclude-standard", "-z").toString("utf8").split("\0").filter(Boolean);
+  hash.update(git("status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...pathspec));
+  hash.update(git("diff", "--binary", "HEAD", "--", ...pathspec));
+  const untracked = git("ls-files", "--others", "--exclude-standard", "-z", "--", ...pathspec)
+    .toString("utf8").split("\0").filter(Boolean);
   for (const file of untracked) hash.update(file).update(readFileSync(file));
   return hash.digest("hex");
 }
@@ -31,28 +38,30 @@ function step(name, command, args) {
 }
 
 function fail(message) {
-  console.error(`\n✖ verify: ${message}`);
+  console.error(`\n✖ verify${ci ? ":ci" : ""}: ${message}`);
   process.exit(1);
 }
 
+console.log(`verify mode: ${ci ? "ci (committed dist, strict tree)" : "local (working-tree dist, tree check ignores dist/)"}`);
 const before = treeState();
 
 step("typecheck", "npx", ["tsc", "--noEmit"]);
 step("vitest", "npx", ["vitest", "run"]);
+// Writes only the ignored dist/index.html; the tracked artifact is not touched.
 step("build", "npx", ["vite", "build"]);
+step("playwright", "npx", ["playwright", "test"]);
 
-console.log(`\n▶ byte-compare dist/index.html with committed ${ARTIFACT}`);
+const reference = ci ? `committed ${ARTIFACT}` : `working-tree ${ARTIFACT}`;
+console.log(`\n▶ compare fresh build with ${reference}`);
 const built = readFileSync("dist/index.html");
-const committed = git("show", `HEAD:${ARTIFACT}`);
-if (!built.equals(committed)) {
-  fail(`the build differs from the committed ${ARTIFACT}; run \`npm run build\` and commit the result`);
+const expected = ci ? git("show", `HEAD:${ARTIFACT}`) : readFileSync(ARTIFACT);
+if (!built.equals(expected)) {
+  fail(`the fresh build differs from the ${reference}; run \`npm run build\`${ci ? " and commit the result" : ""}`);
 }
 console.log("identical");
-
-step("playwright", "npx", ["playwright", "test"]);
 
 console.log("\n▶ working tree check");
 if (treeState() !== before) fail("the verification run modified the working tree");
 if (ci && git("status", "--porcelain").length > 0) fail("the working tree is dirty");
 console.log("clean");
-console.log("\n✔ verify passed");
+console.log(`\n✔ verify${ci ? ":ci" : ""} passed`);

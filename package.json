@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Pure in-browser client-side HRIS reconciliation engine",
   "private": true,
+  "engines": {
+    "node": "24.21.0"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +14,8 @@
     "test": "vitest run",
     "test:browser": "npm run build && playwright test",
     "test:watch": "vitest",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "verify:ci": "node scripts/verify.mjs --ci"
   },
   "dependencies": {
     "papaparse": "^5.5.2"
