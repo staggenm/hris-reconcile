@@ -7,7 +7,8 @@ __pycache__/
 .coverage
 htmlcov/
 output/
-dist/
+dist/*
+!dist/HRIS-Reconciliation.exe
 build/
 *.egg-info/
 .DS_Store
