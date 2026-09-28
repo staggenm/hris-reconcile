@@ -15,7 +15,8 @@
     "test:browser": "npm run build && playwright test",
     "test:watch": "vitest",
     "verify": "node scripts/verify.mjs",
-    "verify:ci": "node scripts/verify.mjs --ci"
+    "verify:ci": "node scripts/verify.mjs --ci",
+    "bench": "node scripts/bench.mjs"
   },
   "dependencies": {
     "papaparse": "^5.5.2"

@@ -63,7 +63,7 @@ describe("identity normalizers", () => {
       fields: [{ name: "v", left: "v", right: "v", normalize: [] }], valueMappings: {},
     };
     const result = new ReconciliationEngine().reconcile({ contract, leftDataset: dataset("l", ["0042"]), rightDataset: dataset("r", ["42"]) });
-    expect(result.fieldResults.map((item) => [item.identity, item.status])).toEqual([["42", "match_exact"]]);
+    expect([...result.fieldResults()].map((item) => [item.identity, item.status])).toEqual([["42", "match_exact"]]);
     const bad = { ...contract, identity: { ...contract.identity, normalize: ["lowercase" as IdentityNormalizerName] } };
     expect(() => new ReconciliationEngine().reconcile({ contract: bad, leftDataset: dataset("l", ["1"]), rightDataset: dataset("r", ["1"]) }))
       .toThrow(/unsupported identity normalizer 'lowercase'/);

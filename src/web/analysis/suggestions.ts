@@ -1,7 +1,9 @@
+import { AppError } from "../core/errors";
 import { Dataset } from "../core/types";
 import { casefold } from "../core/normalization";
 import { compareCodePoints } from "../core/compare";
-import { ColumnProfile, profileDataset } from "./profiling";
+import { analysisOf, DatasetAnalysis } from "./dataset_analysis";
+import { ColumnProfile } from "./profiling";
 
 const FIELD_ALIASES = new Map<string, number>([
   ["firstname|givenname", 0.92],
@@ -99,17 +101,6 @@ export function scoreFieldPair(leftColumn: string, rightColumn: string): number 
   return Math.round(Math.max(characterScore, tokenScore, aliasScore) * 10000) / 10000;
 }
 
-function normalizedValues(dataset: Dataset, column: string): Set<string> {
-  const result = new Set<string>();
-  for (const record of dataset.records) {
-    const value = record[column];
-    if (value !== null && value !== undefined && value.trim() !== "") {
-      result.add(casefold(value.trim()));
-    }
-  }
-  return result;
-}
-
 function population(profile: ColumnProfile): number {
   return profile.row_count > 0 ? profile.non_null_count / profile.row_count : 0.0;
 }
@@ -147,14 +138,14 @@ export interface IdentityCandidate {
 }
 
 export function buildIdentityCandidate(
-  left: Dataset,
-  right: Dataset,
+  left: DatasetAnalysis,
+  right: DatasetAnalysis,
   leftProfile: ColumnProfile,
   rightProfile: ColumnProfile,
 ): IdentityCandidate {
   const headerScore = scoreFieldPair(leftProfile.column_name, rightProfile.column_name);
-  const leftValues = normalizedValues(left, leftProfile.column_name);
-  const rightValues = normalizedValues(right, rightProfile.column_name);
+  const leftValues = left.normalizedValues(leftProfile.column_name);
+  const rightValues = right.normalizedValues(rightProfile.column_name);
 
   let overlapIntersection = 0;
   for (const val of leftValues) {
@@ -211,9 +202,11 @@ export function buildIdentityCandidate(
   };
 }
 
-export function suggestIdentity(left: Dataset, right: Dataset): IdentityCandidate {
-  const leftProfiles = profileDataset(left);
-  const rightProfiles = profileDataset(right);
+export function suggestIdentity(leftInput: Dataset | DatasetAnalysis, rightInput: Dataset | DatasetAnalysis): IdentityCandidate {
+  const left = analysisOf(leftInput);
+  const right = analysisOf(rightInput);
+  const leftProfiles = left.profiles();
+  const rightProfiles = right.profiles();
 
   const candidates: IdentityCandidate[] = [];
   for (const lp of leftProfiles) {
@@ -223,7 +216,7 @@ export function suggestIdentity(left: Dataset, right: Dataset): IdentityCandidat
   }
 
   if (candidates.length === 0) {
-    throw new Error("both datasets must contain at least one column");
+    throw new AppError("INTERNAL", "both datasets must contain at least one column");
   }
 
   candidates.sort((a, b) => {
@@ -242,18 +235,18 @@ export function suggestIdentity(left: Dataset, right: Dataset): IdentityCandidat
 }
 
 export function scoreIdentityPair(
-  left: Dataset,
-  right: Dataset,
+  leftInput: Dataset | DatasetAnalysis,
+  rightInput: Dataset | DatasetAnalysis,
   options: { left_column: string; right_column: string },
 ): IdentityCandidate {
-  const leftProfiles = profileDataset(left);
-  const rightProfiles = profileDataset(right);
+  const left = analysisOf(leftInput);
+  const right = analysisOf(rightInput);
 
-  const lp = leftProfiles.find((p) => p.column_name === options.left_column);
-  if (!lp) throw new Error(`unknown identity column: ${options.left_column}`);
+  const lp = left.profile(options.left_column);
+  if (!lp) throw new AppError("IDENTITY_COLUMN_UNKNOWN", `unknown identity column: ${options.left_column}`);
 
-  const rp = rightProfiles.find((p) => p.column_name === options.right_column);
-  if (!rp) throw new Error(`unknown identity column: ${options.right_column}`);
+  const rp = right.profile(options.right_column);
+  if (!rp) throw new AppError("IDENTITY_COLUMN_UNKNOWN", `unknown identity column: ${options.right_column}`);
 
   return buildIdentityCandidate(left, right, lp, rp);
 }

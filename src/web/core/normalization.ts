@@ -1,3 +1,4 @@
+import { AppError } from "./errors";
 import { NormalizerName } from "./types";
 import { CASEFOLD_TABLE, WHITESPACE_CODEPOINTS } from "./unicode_casefold";
 
@@ -62,7 +63,7 @@ export class NormalizerRegistry {
   resolve(name: string): Normalizer {
     const fn = this.normalizers.get(name);
     if (!fn) {
-      throw new Error(`unknown normalizer: ${name}`);
+      throw new AppError("NORMALIZER_UNKNOWN", `unknown normalizer: ${name}`);
     }
     return fn;
   }

@@ -1,3 +1,6 @@
+import { AppError } from "./errors";
+import { checkComparisons, Limits } from "./limits";
+import { emptyFieldCounts, isDiscrepancy } from "./status";
 import { compareFieldWithResolver } from "./comparator";
 import { compareCodePoints } from "./compare";
 import { MappingResolver, normalizedResolver } from "./mapping";
@@ -6,6 +9,7 @@ import {
   Dataset,
   DatasetStatistics,
   FieldComparisonResult,
+  FieldStatusCounts,
   ReconciliationContract,
   ReconciliationResult,
 } from "./types";
@@ -13,7 +17,8 @@ import {
 function validateRequiredColumns(dataset: Dataset, required: Set<string>): void {
   const missing = Array.from(required).filter((col) => !dataset.columns.includes(col));
   if (missing.length > 0) {
-    throw new Error(
+    throw new AppError(
+      "COLUMNS_MISSING",
       `dataset '${dataset.name}' missing required columns: ${missing.sort(compareCodePoints).join(", ")}`,
     );
   }
@@ -32,6 +37,7 @@ export class ReconciliationEngine {
     contract: ReconciliationContract;
     leftDataset: Dataset;
     rightDataset: Dataset;
+    limits?: Limits;
   }): ReconciliationResult {
     const { contract, leftDataset, rightDataset } = options;
 
@@ -46,12 +52,13 @@ export class ReconciliationEngine {
 
     validateRequiredColumns(leftDataset, leftRequired);
     validateRequiredColumns(rightDataset, rightRequired);
+    checkComparisons(leftDataset.records.length, rightDataset.records.length, contract.fields.length, options.limits);
 
     const mappingResolvers = new Map<object, MappingResolver>();
     for (const field of contract.fields) {
       if (!field.valueMapping) continue;
       const mapping = contract.valueMappings[field.valueMapping];
-      if (!mapping) throw new Error(`value mapping '${field.valueMapping}' not found`);
+      if (!mapping) throw new AppError("MAPPING_NOT_FOUND", `value mapping '${field.valueMapping}' not found`);
       mappingResolvers.set(
         field,
         normalizedResolver(field.valueMapping, mapping, field.normalize),
@@ -64,34 +71,41 @@ export class ReconciliationEngine {
       normalize: contract.identity.normalize,
     });
 
-    const fieldResults: FieldComparisonResult[] = [];
-
-    for (const identityResult of identityResults) {
-      if (identityResult.status !== "matched") {
-        continue;
-      }
-      if (identityResult.identity === null || !identityResult.leftRecord || !identityResult.rightRecord) {
-        throw new Error("matched identity must contain both records");
-      }
-
-      for (const field of contract.fields) {
-        fieldResults.push(
-          compareFieldWithResolver({
+    function* compareAll(): Generator<FieldComparisonResult> {
+      for (const identityResult of identityResults) {
+        if (identityResult.status !== "matched") {
+          continue;
+        }
+        if (identityResult.identity === null || !identityResult.leftRecord || !identityResult.rightRecord) {
+          throw new AppError("INTERNAL", "matched identity must contain both records");
+        }
+        for (const field of contract.fields) {
+          yield compareFieldWithResolver({
             identity: identityResult.identity,
             leftRecord: identityResult.leftRecord,
             rightRecord: identityResult.rightRecord,
             field,
             valueMappings: contract.valueMappings,
-          }, mappingResolvers.get(field)),
-        );
+          }, mappingResolvers.get(field));
+        }
       }
+    }
+
+    const fieldCounts = new Map<string, FieldStatusCounts>();
+    for (const field of contract.fields) fieldCounts.set(field.name, emptyFieldCounts());
+    const discrepancies: FieldComparisonResult[] = [];
+    for (const comparison of compareAll()) {
+      fieldCounts.get(comparison.fieldName)![comparison.status]++;
+      if (isDiscrepancy(comparison)) discrepancies.push(comparison);
     }
 
     return {
       leftDataset: getStatistics(leftDataset),
       rightDataset: getStatistics(rightDataset),
       identityResults,
-      fieldResults,
+      discrepancies,
+      fieldCounts,
+      fieldResults: compareAll,
     };
   }
 }

@@ -1,3 +1,4 @@
+import { AppError } from "../core/errors";
 import { Dataset, IdentityNormalizerName } from "../core/types";
 import { reconcileIdentities } from "../core/identity";
 import { compareNullableCodePoints } from "../core/compare";
@@ -33,7 +34,7 @@ export function analyzeObservedPairs(
   for (const identity of identities) {
     if (identity.status !== "matched") continue;
     if (!identity.leftRecord || !identity.rightRecord) {
-      throw new Error("matched identity must contain both records");
+      throw new AppError("INTERNAL", "matched identity must contain both records");
     }
     pairs.push([
       identity.leftRecord[options.left_field] ?? null,

@@ -64,7 +64,16 @@ wizard (main thread) ──> ReconciliationContract ────┘
 
 - `src/web/main.ts` is the UI step controller. It never holds full datasets.
 - `src/web/reconciliation.worker.ts` owns datasets and results and answers paged
-  queries; `src/web/worker_client.ts` is the main-thread client.
+  queries; `src/web/worker_client.ts` is the main-thread client. The worker
+  caches column profiles and normalized value sets once per dataset per
+  session (`analysis/dataset_analysis.ts`).
+- Results are summary-first: full records are kept only for non-matching
+  comparisons, and matches are counts. The matching-details page and
+  `full.csv` are recomputed lazily from the datasets and contract.
+- Exports are streamed as text chunks into a `Blob` inside the worker, and the
+  Blob is posted to the page. No report-sized string is built.
+- If the worker crashes (typically out of memory), the session is reset with
+  "Processing stopped (likely memory). Session reset."
 - `src/web/core/` is the engine: normalization, value mappings, identity
   grouping, comparison, and exports. `src/web/analysis/` holds CSV parsing,
   profiling, suggestions, and result aggregation.
@@ -82,6 +91,9 @@ Important policies are fail-fast:
   `MISSING_IDENTITY_LEFT` / `MISSING_IDENTITY_RIGHT`; duplicate identities
   receive explicit statuses.
 - Output order uses Unicode code-point order, never the browser locale.
+- Every error carries a stable code (for example `CSV_ROW_WIDTH`,
+  `LIMIT_ROWS`, `MAPPING_CONFLICT`, `WORKER_CRASHED`), shown next to the
+  message. The catalogue is `src/web/core/errors.ts`.
 
 ## Usage
 
@@ -97,8 +109,9 @@ compiled application and styles and needs nothing beside it. Opening
 
 The guided workflow lets an analyst:
 
-1. upload and profile two UTF-8 CSV files using comma, semicolon, tab, or pipe
-   separators;
+1. upload and profile two CSV files (UTF-8 by default, or Windows-1252 via the
+   encoding selector; a UTF-8 decode failure suggests Windows-1252) using
+   comma, semicolon, tab, or pipe separators;
 2. review an explainable employee-identity suggestion and confirm it;
 3. confirm corresponding fields with exact comparison as the default;
 4. review observed value-pair frequencies before confirming semantic mappings;
@@ -216,6 +229,15 @@ CSV/JSON reports. It does not yet support:
 - dates, effective dating, or historical records
 - numeric types and tolerances
 - fuzzy matching
+
+Volume limits (`src/web/core/limits.ts`) are checked before work starts: the
+file size before reading, rows and columns after parsing, and the estimated
+comparisons (smaller row count × fields) before reconciling. Current values are
+50 MB per file, 200,000 rows, 200 columns, and 5,000,000 comparisons. They are
+**provisional** until confirmed with `npm run bench`, which is not part of
+verify or CI. That command builds a copy without limits, runs synthetic 10k /
+100k / 200k-row × 30-field datasets through Chromium, and writes timings and
+peak heap to `test-results/bench/`.
 
 CSV empty cells become explicit nulls. Identity fields receive no implicit
 normalization. If an identity is duplicated, it is reported and excluded from

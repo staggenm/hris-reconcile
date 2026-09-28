@@ -1,3 +1,4 @@
+import { AppError } from "./errors";
 import { MappingConfig, NormalizerName } from "./types";
 import { normalize } from "./normalization";
 
@@ -51,7 +52,8 @@ export function validateMapping(
         // Only an alias resolving to two different canonicals is ambiguous;
         // repeating it under the same canonical is harmless.
         if (prior !== undefined && prior !== canonical) {
-          throw new Error(
+          throw new AppError(
+            "MAPPING_AMBIGUOUS",
             `value mapping '${mappingName}' has ambiguous ${side} alias '${rawAlias}' between canonical entries '${prior}' and '${canonical}'`,
           );
         }

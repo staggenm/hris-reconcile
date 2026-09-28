@@ -6,17 +6,9 @@ import {
 } from "../core/types";
 import { compareCodePoints, compareNullableCodePoints } from "../core/compare";
 
-export const DISCREPANCY_STATUSES = new Set<FieldComparisonStatus>([
-  "mismatch",
-  "left_null",
-  "right_null",
-  "unmapped_left",
-  "unmapped_right",
-]);
+import { DISCREPANCY_STATUSES, FIELD_STATUSES, isDiscrepancy } from "../core/status";
 
-export function isDiscrepancy(result: FieldComparisonResult): boolean {
-  return DISCREPANCY_STATUSES.has(result.status);
-}
+export { DISCREPANCY_STATUSES, isDiscrepancy };
 
 export interface FieldMismatchSummary {
   field_name: string;
@@ -28,19 +20,15 @@ export interface FieldMismatchSummary {
 export function aggregateMismatchesByField(
   result: ReconciliationResult,
 ): FieldMismatchSummary[] {
-  const totals = new Map<string, number>();
-  const mismatches = new Map<string, number>();
-
-  for (const item of result.fieldResults) {
-    totals.set(item.fieldName, (totals.get(item.fieldName) || 0) + 1);
-    if (isDiscrepancy(item)) {
-      mismatches.set(item.fieldName, (mismatches.get(item.fieldName) || 0) + 1);
-    }
-  }
-
   const summaries: FieldMismatchSummary[] = [];
-  for (const [field, count] of mismatches.entries()) {
-    const total = totals.get(field) || count;
+  for (const [field, counts] of result.fieldCounts) {
+    let total = 0;
+    let count = 0;
+    for (const status of FIELD_STATUSES) {
+      total += counts[status];
+      if (DISCREPANCY_STATUSES.has(status)) count += counts[status];
+    }
+    if (count === 0) continue;
     summaries.push({
       field_name: field,
       mismatch_count: count,
@@ -72,8 +60,8 @@ export function aggregateMismatchesByPair(
   result: ReconciliationResult,
   options: { fieldName: string },
 ): PairMismatchSummary[] {
-  const details = result.fieldResults.filter(
-    (item) => item.fieldName === options.fieldName && isDiscrepancy(item),
+  const details = result.discrepancies.filter(
+    (item) => item.fieldName === options.fieldName,
   );
 
   const counts = new Map<
@@ -139,8 +127,8 @@ export function mismatchDetails(
     filterRight?: boolean;
   },
 ): FieldComparisonResult[] {
-  return result.fieldResults.filter((item) => {
-    if (item.fieldName !== options.fieldName || !isDiscrepancy(item)) {
+  return result.discrepancies.filter((item) => {
+    if (item.fieldName !== options.fieldName) {
       return false;
     }
     if (options.filterLeft && item.leftRawValue !== (options.leftValue ?? null)) {
@@ -201,8 +189,8 @@ export function computeResultsSummary(result: ReconciliationResult): ResultsSumm
     mismatch: 0,
   };
 
-  for (const item of result.fieldResults) {
-    fieldCounts[item.status]++;
+  for (const counts of result.fieldCounts.values()) {
+    for (const status of FIELD_STATUSES) fieldCounts[status] += counts[status];
   }
 
   const fieldMatches =
@@ -244,4 +232,29 @@ export function computeResultsSummary(result: ReconciliationResult): ResultsSumm
       unmapped_values: fieldCounts.unmapped_left + fieldCounts.unmapped_right,
     },
   };
+}
+
+export interface ResultPage<T> {
+  rows: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+// Matching comparisons are not stored; a page is recomputed by iterating the
+// lazy comparison sequence and keeping only the requested window.
+export function matchingDetailsPage(
+  result: ReconciliationResult,
+  options: { page: number; pageSize: number },
+): ResultPage<FieldComparisonResult> {
+  const start = options.page * options.pageSize;
+  const end = start + options.pageSize;
+  const rows: FieldComparisonResult[] = [];
+  let total = 0;
+  for (const item of result.fieldResults()) {
+    if (isDiscrepancy(item)) continue;
+    if (total >= start && total < end) rows.push(item);
+    total++;
+  }
+  return { rows, total, page: options.page, pageSize: options.pageSize };
 }

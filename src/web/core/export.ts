@@ -1,8 +1,10 @@
 import {
+  FieldComparisonResult,
+  FieldComparisonStatus,
   ReconciliationContract,
   ReconciliationResult,
 } from "./types";
-import { isDiscrepancy } from "../analysis/results_analysis";
+import { FIELD_STATUSES } from "./status";
 
 const CSV_COLUMNS = [
   "record_type",
@@ -28,7 +30,7 @@ const IDENTITY_PUBLIC: Record<ReconciliationResult["identityResults"][number]["s
   missing_identity_left: "MISSING_IDENTITY_LEFT",
   missing_identity_right: "MISSING_IDENTITY_RIGHT",
 };
-const FIELD_PUBLIC: Record<ReconciliationResult["fieldResults"][number]["status"], string> = {
+const FIELD_PUBLIC: Record<FieldComparisonStatus, string> = {
   match_exact: "MATCH_EXACT",
   match_normalized: "MATCH_NORMALIZED",
   match_mapped: "MATCH_MAPPED",
@@ -66,17 +68,53 @@ function escapeCsvCell(value: string | null | undefined, excelSafe = false): str
   return str;
 }
 
-export function generateReconciliationCsv(
-  result: ReconciliationResult,
-  options: { mismatchesOnly?: boolean; excelSafe?: boolean } = {},
-): string {
-  const mismatchesOnly = options.mismatchesOnly ?? false;
-  const excelSafe = options.excelSafe ?? true;
-  const cell = (value: string | null | undefined) => escapeCsvCell(value, excelSafe);
-  const lines: string[] = [];
+// Exports are produced as text chunks of about CHUNK_CHARS characters and
+// assembled into a Blob, so no report-sized string is ever built.
+export const CHUNK_CHARS = 64 * 1024;
 
-  // Header line
-  lines.push(CSV_COLUMNS.join(","));
+function* batched(pieces: Iterable<string>): Generator<string> {
+  let buffer: string[] = [];
+  let size = 0;
+  for (const piece of pieces) {
+    buffer.push(piece);
+    size += piece.length;
+    if (size >= CHUNK_CHARS) {
+      yield buffer.join("");
+      buffer = [];
+      size = 0;
+    }
+  }
+  if (size > 0) yield buffer.join("");
+}
+
+// Chunks are folded into the Blob every BLOB_FOLD_CHARS characters, which
+// hands the text to the browser's Blob storage, so the worker's JS heap never
+// holds the whole export.
+export const BLOB_FOLD_CHARS = 8 * 1024 * 1024;
+
+export function exportBlob(chunks: Iterable<string>, type: string): Blob {
+  let blob = new Blob([], { type });
+  let pending: string[] = [];
+  let size = 0;
+  for (const chunk of chunks) {
+    pending.push(chunk);
+    size += chunk.length;
+    if (size >= BLOB_FOLD_CHARS) {
+      blob = new Blob([blob, ...pending], { type });
+      pending = [];
+      size = 0;
+    }
+  }
+  return pending.length > 0 ? new Blob([blob, ...pending], { type }) : blob;
+}
+
+function* csvLines(
+  result: ReconciliationResult,
+  mismatchesOnly: boolean,
+  excelSafe: boolean,
+): Generator<string> {
+  const cell = (value: string | null | undefined) => escapeCsvCell(value, excelSafe);
+  yield `${CSV_COLUMNS.join(",")}\n`;
 
   for (const identity of result.identityResults) {
     if (mismatchesOnly && identity.status === "matched") {
@@ -96,13 +134,10 @@ export function generateReconciliationCsv(
       "", // comparison_status
       cell(IDENTITY_PUBLIC[identity.status]),
     ];
-    lines.push(row.join(","));
+    yield `${row.join(",")}\n`;
   }
 
-  for (const field of result.fieldResults) {
-    if (mismatchesOnly && !isDiscrepancy(field)) {
-      continue;
-    }
+  for (const field of mismatchesOnly ? result.discrepancies : result.fieldResults()) {
     const row = [
       "field_comparison",
       cell(field.identity),
@@ -117,10 +152,15 @@ export function generateReconciliationCsv(
       cell(FIELD_PUBLIC[field.status]),
       "", // identity_status
     ];
-    lines.push(row.join(","));
+    yield `${row.join(",")}\n`;
   }
+}
 
-  return lines.join("\n") + "\n";
+export function csvChunks(
+  result: ReconciliationResult,
+  options: { mismatchesOnly?: boolean; excelSafe?: boolean } = {},
+): Generator<string> {
+  return batched(csvLines(result, options.mismatchesOnly ?? false, options.excelSafe ?? true));
 }
 
 export interface JsonReport {
@@ -138,25 +178,81 @@ export interface JsonReport {
   field_comparison_summary: Record<string, number>;
   details: {
     identities: Array<{ identity: string | null; status: string }>;
-    field_comparisons: Array<{
-      identity: string;
-      field_name: string;
-      left_raw_value: string | null;
-      right_raw_value: string | null;
-      left_normalized_value: string | null;
-      right_normalized_value: string | null;
-      left_canonical_value: string | null;
-      right_canonical_value: string | null;
-      status: string;
-      mapping_name: string | null;
-    }>;
+    field_comparisons: Iterable<JsonFieldComparison>;
   };
 }
 
-export function generateReconciliationJson(
+interface JsonFieldComparison {
+  identity: string;
+  field_name: string;
+  left_raw_value: string | null;
+  right_raw_value: string | null;
+  left_normalized_value: string | null;
+  right_normalized_value: string | null;
+  left_canonical_value: string | null;
+  right_canonical_value: string | null;
+  status: string;
+  mapping_name: string | null;
+}
+
+// A JSON array whose items are produced on demand while writing.
+class LazyArray {
+  constructor(readonly items: () => Iterable<unknown>) {}
+}
+
+// Streams `value` exactly as JSON.stringify(value, null, 2) would print it.
+// Arrays (and LazyArrays) are written item by item; each item is small and is
+// stringified whole, then re-indented to its depth.
+function* prettyJson(value: unknown, indent: string): Generator<string> {
+  const inner = `${indent}  `;
+  if (value instanceof LazyArray || Array.isArray(value)) {
+    const items = value instanceof LazyArray ? value.items() : value;
+    let first = true;
+    for (const item of items) {
+      yield `${first ? "[\n" : ",\n"}${inner}${JSON.stringify(item, null, 2).replace(/\n/g, `\n${inner}`)}`;
+      first = false;
+    }
+    yield first ? "[]" : `\n${indent}]`;
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value).filter(([, item]) => item !== undefined);
+    if (entries.length === 0) {
+      yield "{}";
+      return;
+    }
+    yield "{\n";
+    for (let index = 0; index < entries.length; index++) {
+      const [key, item] = entries[index];
+      yield `${inner}${JSON.stringify(key)}: `;
+      yield* prettyJson(item, inner);
+      yield index < entries.length - 1 ? ",\n" : "\n";
+    }
+    yield `${indent}}`;
+    return;
+  }
+  yield JSON.stringify(value);
+}
+
+function jsonComparison(f: FieldComparisonResult): JsonFieldComparison {
+  return {
+    identity: f.identity,
+    field_name: f.fieldName,
+    left_raw_value: f.leftRawValue,
+    right_raw_value: f.rightRawValue,
+    left_normalized_value: f.leftNormalizedValue,
+    right_normalized_value: f.rightNormalizedValue,
+    left_canonical_value: f.leftCanonicalValue,
+    right_canonical_value: f.rightCanonicalValue,
+    status: FIELD_PUBLIC[f.status],
+    mapping_name: f.mappingName ?? null,
+  };
+}
+
+export function jsonChunks(
   contract: ReconciliationContract,
   result: ReconciliationResult,
-): string {
+): Generator<string> {
   const identitySummary: Record<string, number> = {
     MATCHED: 0,
     MISSING_LEFT: 0,
@@ -181,11 +277,11 @@ export function generateReconciliationJson(
     UNMAPPED_RIGHT: 0,
     MISMATCH: 0,
   };
-  for (const f of result.fieldResults) {
-    fieldComparisonSummary[FIELD_PUBLIC[f.status]]++;
+  for (const counts of result.fieldCounts.values()) {
+    for (const status of FIELD_STATUSES) fieldComparisonSummary[FIELD_PUBLIC[status]] += counts[status];
   }
 
-  const report: JsonReport = {
+  const report = {
     run_metadata: {
       format_version: "1.0",
       engine_version: "0.3.0",
@@ -207,24 +303,17 @@ export function generateReconciliationJson(
     identity_summary: identitySummary,
     field_comparison_summary: fieldComparisonSummary,
     details: {
-      identities: result.identityResults.map((id) => ({
-        identity: id.identity,
-        status: IDENTITY_PUBLIC[id.status],
-      })),
-      field_comparisons: result.fieldResults.map((f) => ({
-        identity: f.identity,
-        field_name: f.fieldName,
-        left_raw_value: f.leftRawValue,
-        right_raw_value: f.rightRawValue,
-        left_normalized_value: f.leftNormalizedValue,
-        right_normalized_value: f.rightNormalizedValue,
-        left_canonical_value: f.leftCanonicalValue,
-        right_canonical_value: f.rightCanonicalValue,
-        status: FIELD_PUBLIC[f.status],
-        mapping_name: f.mappingName ?? null,
-      })),
+      identities: new LazyArray(function* () {
+        for (const id of result.identityResults) yield { identity: id.identity, status: IDENTITY_PUBLIC[id.status] };
+      }),
+      field_comparisons: new LazyArray(function* () {
+        for (const f of result.fieldResults()) yield jsonComparison(f);
+      }),
     },
   };
 
-  return JSON.stringify(report, null, 2) + "\n";
+  return batched((function* () {
+    yield* prettyJson(report, "");
+    yield "\n";
+  })());
 }

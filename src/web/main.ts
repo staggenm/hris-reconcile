@@ -1,3 +1,6 @@
+import { AppError, errorCodeOf } from "./core/errors";
+import { checkFileSize } from "./core/limits";
+import { CsvEncoding } from "./analysis/csv";
 import { ColumnProfile } from "./analysis/profiling";
 import { suggestFieldMappings } from "./analysis/suggestions";
 import { ObservedPair } from "./analysis/mapping_analysis";
@@ -16,7 +19,7 @@ import {
   selectionsFromRows,
   valueFromInput,
 } from "./ui/mapping_editor";
-import { parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
+import { onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
 import {
   ComparisonMode,
   DatasetSummary,
@@ -49,6 +52,8 @@ interface AppState {
 let sessionGeneration = 0;
 let runGeneration = 0;
 const uploadGeneration: Record<"left" | "right", number> = { left: 0, right: 0 };
+// The last chosen file per side, so changing the encoding can re-parse it.
+const chosenFiles: Record<"left" | "right", File | null> = { left: null, right: null };
 const downloadUrls = new Set<string>();
 const mappingPages = new WeakMap<MappingEditorState, number>();
 
@@ -73,7 +78,7 @@ const modes: ComparisonMode[] = [
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string): T => {
   const el = document.querySelector<T>(selector);
-  if (!el) throw new Error(`Element not found: ${selector}`);
+  if (!el) throw new AppError("INTERNAL", `Element not found: ${selector}`);
   return el;
 };
 
@@ -94,7 +99,10 @@ function show(selector: string, visible = true): void {
 
 function showError(error: unknown): void {
   const target = $("#error");
-  target.textContent = error instanceof Error ? error.message : String(error);
+  const code = errorCodeOf(error);
+  const message = error instanceof Error ? error.message : String(error);
+  target.dataset.code = code;
+  target.replaceChildren(node("span", code, "error-code"), document.createTextNode(` ${message}`));
   target.classList.remove("hidden");
   target.scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -167,16 +175,19 @@ function invalidateAfterUpload(): void {
 
 async function upload(side: "left" | "right", file: File): Promise<void> {
   clearError();
+  chosenFiles[side] = file;
   const session = sessionGeneration;
   const request = ++uploadGeneration[side];
   invalidateAfterUpload();
   state[side] = null;
   $(`#${side}-dataset`).replaceChildren();
   try {
+    checkFileSize(file.name, file.size);
     const buffer = await file.arrayBuffer();
     if (session !== sessionGeneration || request !== uploadGeneration[side]) return;
     const name = file.name.replace(/\.[^/.]+$/, "") || side.toUpperCase();
-    const parsed = await parseAndProfileInWorker({ content: buffer, name, side, sessionGeneration: session });
+    const encoding = ($(`#${side}-encoding`) as HTMLSelectElement).value as CsvEncoding;
+    const parsed = await parseAndProfileInWorker({ content: buffer, name, side, encoding, sessionGeneration: session });
     if (session !== sessionGeneration || request !== uploadGeneration[side]) return;
     const { summary, profiles } = parsed;
     state[side] = summary;
@@ -211,7 +222,7 @@ function renderDataset(
   nameInput.addEventListener("change", () => {
     const trimmed = nameInput.value.trim();
     if (!trimmed) {
-      showError(new Error("dataset name cannot be blank"));
+      showError(new AppError("CONTRACT_INVALID", "dataset name cannot be blank"));
       nameInput.value = data.name;
       return;
     }
@@ -436,13 +447,13 @@ function confirmFields(): void {
   if (!state.left || !state.right || !state.identity) return;
   const active = state.fields.filter((item) => item.mode !== "Ignore");
   if (active.length === 0) {
-    showError(new Error("select at least one comparison field"));
+    showError(new AppError("CONTRACT_INVALID", "select at least one comparison field"));
     return;
   }
   const leftCols = new Set(active.map((f) => f.left_column));
   const rightCols = new Set(active.map((f) => f.right_column));
   if (leftCols.size !== active.length || rightCols.size !== active.length) {
-    showError(new Error("a field cannot be mapped more than once on either side"));
+    showError(new AppError("CONTRACT_INVALID", "a field cannot be mapped more than once on either side"));
     return;
   }
 
@@ -637,7 +648,7 @@ function confirmMappings(): void {
 }
 
 function buildCurrentContract(): ReconciliationContract {
-  if (!state.left || !state.right || !state.identity) throw new Error("upload both datasets and confirm identity first");
+  if (!state.left || !state.right || !state.identity) throw new AppError("SESSION_STATE", "upload both datasets and confirm identity first");
   const fieldSelections: FieldSelection[] = state.fields.map((f) => {
     const editor = state.pairs.find((ed) => ed.field.left_column === f.left_column);
     if (f.mode !== "Value mapping" || !editor) return f;
@@ -848,29 +859,17 @@ function resultDetailTable(page: WorkerPage<FieldComparisonResult>, label: strin
 
 async function download(file: string): Promise<void> {
   if (!state.result || !state.contract) {
-    showError(new Error("run the reconciliation first"));
+    showError(new AppError("SESSION_STATE", "run the reconciliation first"));
     return;
   }
   const root = state.contract.name;
-  let filename: string;
-  let mime: string;
+  const filenames: Record<string, string> = { "full.csv": `${root}_full.csv`, "mismatches.csv": `${root}_mismatches.csv`, "report.json": `${root}.json` };
+  const filename = filenames[file];
+  if (!filename) return;
 
-  if (file === "full.csv") {
-    filename = `${root}_full.csv`;
-    mime = "text/csv;charset=utf-8;";
-  } else if (file === "mismatches.csv") {
-    filename = `${root}_mismatches.csv`;
-    mime = "text/csv;charset=utf-8;";
-  } else if (file === "report.json") {
-    filename = `${root}.json`;
-    mime = "application/json;charset=utf-8;";
-  } else {
-    return;
-  }
-
+  // The worker streams the export into a Blob; no report-sized string reaches this thread.
   const excelSafe = ($("#excel-safe") as HTMLInputElement).checked;
-  const content = await queryWorker<string>("export", { format: file, resultId: state.result.resultId, excelSafe }, sessionGeneration);
-  const blob = new Blob([content], { type: mime });
+  const blob = await queryWorker<Blob>("export", { format: file, resultId: state.result.resultId, excelSafe }, sessionGeneration);
   const anchor = document.createElement("a");
   anchor.href = URL.createObjectURL(blob);
   const objectUrl = anchor.href;
@@ -912,6 +911,10 @@ function clearSession(): void {
   ($( "#result-pair") as HTMLSelectElement).replaceChildren();
   for (const input of identityNormalizerInputs()) input.checked = false;
   ($("#excel-safe") as HTMLInputElement).checked = true;
+  chosenFiles.left = null;
+  chosenFiles.right = null;
+  ($("#left-encoding") as HTMLSelectElement).value = "utf-8";
+  ($("#right-encoding") as HTMLSelectElement).value = "utf-8";
   ($("#left-file") as HTMLInputElement).value = "";
   ($("#right-file") as HTMLInputElement).value = "";
 
@@ -987,6 +990,21 @@ rightFileInput.addEventListener("change", (e) => {
 
 for (const input of identityNormalizerInputs()) {
   input.addEventListener("change", () => { void scoreIdentity().catch(showError); });
+}
+
+// The worker held every dataset and result, so the whole session is gone:
+// reset the UI to step 1 instead of leaving steps that would fail with
+// "upload first".
+onWorkerCrash((error) => {
+  clearSession();
+  showError(error);
+});
+
+for (const side of ["left", "right"] as const) {
+  $(`#${side}-encoding`).addEventListener("change", () => {
+    const file = chosenFiles[side];
+    if (file) upload(side, file).catch(showError);
+  });
 }
 
 setupDragAndDrop("left");

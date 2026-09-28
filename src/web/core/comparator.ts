@@ -1,3 +1,4 @@
+import { AppError } from "./errors";
 import { normalize } from "./normalization";
 import { MappingResolver, normalizedResolver, validateMapping } from "./mapping";
 import {
@@ -19,7 +20,7 @@ export function compareField(options: {
   let resolver: MappingResolver | undefined;
   if (field.valueMapping) {
     const mapping = valueMappings[field.valueMapping];
-    if (!mapping) throw new Error(`value mapping '${field.valueMapping}' not found`);
+    if (!mapping) throw new AppError("MAPPING_NOT_FOUND", `value mapping '${field.valueMapping}' not found`);
     validateMapping(field.valueMapping, mapping, field.normalize);
     resolver = normalizedResolver(field.valueMapping, mapping, field.normalize);
   }
@@ -58,7 +59,7 @@ export function compareFieldWithResolver(
   } else if (leftRaw === rightRaw) {
     status = "match_exact";
   } else if (field.valueMapping) {
-    if (!resolver) throw new Error(`value mapping '${field.valueMapping}' not found`);
+    if (!resolver) throw new AppError("MAPPING_NOT_FOUND", `value mapping '${field.valueMapping}' not found`);
     const leftRes = resolver.resolve(leftNormalized, "left");
     const rightRes = resolver.resolve(rightNormalized, "right");
     leftCanonical = leftRes.canonicalValue;

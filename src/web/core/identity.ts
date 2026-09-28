@@ -1,3 +1,4 @@
+import { AppError } from "./errors";
 import { normalize, trim } from "./normalization";
 import { compareCodePoints } from "./compare";
 import { Dataset, IDENTITY_NORMALIZERS, IdentityNormalizerName, IdentityResult, RecordRow } from "./types";
@@ -5,7 +6,7 @@ import { Dataset, IDENTITY_NORMALIZERS, IdentityNormalizerName, IdentityResult, 
 export function validateIdentityNormalizers(names: readonly string[]): void {
   for (const name of names) {
     if (!(IDENTITY_NORMALIZERS as readonly string[]).includes(name)) {
-      throw new Error(`unsupported identity normalizer '${name}'`);
+      throw new AppError("IDENTITY_NORMALIZER_UNSUPPORTED", `unsupported identity normalizer '${name}'`);
     }
   }
 }

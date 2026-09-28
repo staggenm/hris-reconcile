@@ -1,3 +1,4 @@
+import { AppError, ErrorCode } from "./errors";
 import {
   ComparisonMode,
   FieldConfig,
@@ -10,9 +11,9 @@ import {
 import { casefold } from "./normalization";
 import { validateMapping } from "./mapping";
 
-export class WizardConfigurationError extends Error {
-  constructor(message: string) {
-    super(message);
+export class WizardConfigurationError extends AppError {
+  constructor(code: ErrorCode, message: string) {
+    super(code, message);
     this.name = "WizardConfigurationError";
   }
 }
@@ -60,6 +61,7 @@ function describeRow(selection: ValueMappingSelection): string {
 function buildMapping(field: FieldSelection): MappingConfig {
   if (!field.value_mappings || field.value_mappings.length === 0) {
     throw new WizardConfigurationError(
+      "MAPPING_INCOMPLETE",
       `value mapping field '${field.left_column}' has no confirmed mappings`,
     );
   }
@@ -75,6 +77,7 @@ function buildMapping(field: FieldSelection): MappingConfig {
       !selection.right_values.length
     ) {
       throw new WizardConfigurationError(
+        "MAPPING_INCOMPLETE",
         "value mapping entries require a canonical value and both sides",
       );
     }
@@ -83,6 +86,7 @@ function buildMapping(field: FieldSelection): MappingConfig {
         const prior = claimed[side].get(value);
         if (prior && prior.canonical_value !== selection.canonical_value) {
           throw new WizardConfigurationError(
+            "MAPPING_CONFLICT",
             `value mapping for field '${field.left_column}': rows ${describeRow(prior)} and ${describeRow(selection)} ` +
               `map Dataset ${side === "left" ? "A" : "B"} value '${value}' to different canonical values`,
           );
@@ -111,7 +115,7 @@ function buildMapping(field: FieldSelection): MappingConfig {
 function identityNormalizers(selected: IdentityNormalizerName[] = []): IdentityNormalizerName[] {
   for (const name of selected) {
     if (!IDENTITY_NORMALIZERS.includes(name)) {
-      throw new WizardConfigurationError(`unsupported identity normalizer '${name}'`);
+      throw new WizardConfigurationError("IDENTITY_NORMALIZER_UNSUPPORTED", `unsupported identity normalizer '${name}'`);
     }
   }
   return IDENTITY_NORMALIZERS.filter((name) => selected.includes(name));
@@ -122,7 +126,7 @@ export function buildContract(configuration: WizardConfiguration): Reconciliatio
     (field) => field.mode !== "Ignore",
   );
   if (activeFields.length === 0) {
-    throw new WizardConfigurationError("select at least one comparison field");
+    throw new WizardConfigurationError("CONTRACT_INVALID", "select at least one comparison field");
   }
 
   const seenLeft = new Set<string>();
@@ -134,6 +138,7 @@ export function buildContract(configuration: WizardConfiguration): Reconciliatio
     const field = activeFields[index - 1];
     if (seenLeft.has(field.left_column) || seenRight.has(field.right_column)) {
       throw new WizardConfigurationError(
+        "CONTRACT_INVALID",
         "a field cannot be mapped more than once on either side",
       );
     }
@@ -142,6 +147,7 @@ export function buildContract(configuration: WizardConfiguration): Reconciliatio
       field.right_column === configuration.right_identity
     ) {
       throw new WizardConfigurationError(
+        "CONTRACT_INVALID",
         "identity fields cannot also be comparison fields",
       );
     }

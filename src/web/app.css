@@ -405,6 +405,17 @@ button.danger:hover {
   text-align: center;
 }
 
+.error-code {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 8%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .identity-normalizers {
   display: flex;
   flex-wrap: wrap;
@@ -420,6 +431,12 @@ button.danger:hover {
   color: var(--text-secondary);
   font-size: 14px;
   font-weight: 600;
+}
+
+.encoding-picker {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  margin-top: 8px;
 }
 
 .inline-check {

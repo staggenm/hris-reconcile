@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { excelSafeCell, generateReconciliationCsv, generateReconciliationJson } from "../src/web/core/export";
+import { excelSafeCell } from "../src/web/core/export";
+import { generateReconciliationCsv, generateReconciliationJson } from "./support/exports";
 import { ReconciliationEngine } from "../src/web/core/reconciliation";
 import { Dataset, ReconciliationContract } from "../src/web/core/types";
 

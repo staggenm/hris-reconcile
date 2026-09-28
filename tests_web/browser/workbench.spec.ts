@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -329,4 +329,76 @@ test("hash-based CSP: full workflow has zero violations and unlisted inline scri
   await expect.poll(() => page.evaluate(() => (window as any).__cspViolations.length)).toBeGreaterThan(0);
   expect(await page.evaluate(() => (window as any).__cspViolations[0])).toMatch(/^script-src/);
   expect(await page.evaluate(() => (window as any).__injected)).toBeUndefined();
+});
+
+test("errors show their stable code next to the message", async ({ page }) => {
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from("a,b\n1,2\n3\n") });
+  await expect(page.locator("#error")).toBeVisible();
+  await expect(page.locator("#error .error-code")).toHaveText("CSV_ROW_WIDTH");
+  await expect(page.locator("#error")).toContainText("CSV row 3 has 1 values; expected 2");
+  await expect(page.locator("#error")).toHaveAttribute("data-code", "CSV_ROW_WIDTH");
+});
+
+test("a file over the size limit is rejected before it is read", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "one engine is enough for a 50 MB upload");
+  await page.goto(artifact);
+  const directory = mkdtempSync(resolve(tmpdir(), "hris-big-"));
+  const oversized = resolve(directory, "big.csv");
+  writeFileSync(oversized, Buffer.alloc(50 * 1024 * 1024 + 1, "a"));
+  try {
+    await page.locator("#left-file").setInputFiles(oversized);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+  await expect(page.locator("#error")).toHaveAttribute("data-code", "LIMIT_FILE_SIZE");
+  await expect(page.locator("#error")).toContainText("file 'big.csv' is 50.0 MB; the limit is 50.0 MB");
+  await expect(page.locator("#left-dataset")).toBeEmpty();
+});
+
+test("a Windows-1252 file fails as UTF-8 with a suggestion and parses after choosing Windows-1252", async ({ page }) => {
+  await page.goto(artifact);
+  const fixture = resolve(root, "tests_web/fixtures/encoding/umlauts_windows1252.csv");
+  await expect(page.locator("#left-encoding")).toHaveValue("utf-8");
+  await page.locator("#left-file").setInputFiles(fixture);
+  await expect(page.locator("#error")).toHaveAttribute("data-code", "CSV_ENCODING");
+  await expect(page.locator("#error")).toContainText("choose Windows-1252");
+  await page.locator("#left-encoding").selectOption("windows-1252");
+  await expect(page.locator("#left-dataset")).toContainText("Müller");
+  await expect(page.locator("#left-dataset")).toContainText("€uro");
+  await expect(page.locator("#error")).toBeHidden();
+});
+
+test("a worker crash resets the session with a clear message and a fresh worker works", async ({ page }) => {
+  await page.addInitScript(() => {
+    const workers: Worker[] = [];
+    Object.defineProperty(window, "__workers", { value: workers });
+    const Original = window.Worker;
+    window.Worker = class extends Original {
+      constructor(...args: ConstructorParameters<typeof Worker>) {
+        super(...args);
+        workers.push(this);
+      }
+    };
+  });
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftCsv) });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightCsv) });
+  await expect(page.locator("#step-identity")).toBeVisible();
+  await page.evaluate(() => (window as any).__workers.at(-1).dispatchEvent(new ErrorEvent("error", { message: "out of memory" })));
+  await expect(page.locator("#error")).toHaveAttribute("data-code", "WORKER_CRASHED");
+  await expect(page.locator("#error")).toContainText("Processing stopped (likely memory). Session reset.");
+  await expect(page.locator("#step-identity")).toBeHidden();
+  await expect(page.locator("#left-dataset")).toBeEmpty();
+  await expect(page.locator("#right-dataset")).toBeEmpty();
+
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftCsv) });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightCsv) });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  await expect(page.locator("#error")).toBeHidden();
+  expect(await page.evaluate(() => (window as any).__workers.length)).toBe(2);
 });

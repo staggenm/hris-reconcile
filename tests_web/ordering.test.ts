@@ -6,7 +6,8 @@ import { suggestFieldMappings, suggestIdentity } from "../src/web/analysis/sugge
 import { compareCodePoints, compareNullableCodePoints } from "../src/web/core/compare";
 import { reconcileIdentities } from "../src/web/core/identity";
 import { ReconciliationEngine } from "../src/web/core/reconciliation";
-import { Dataset, FieldComparisonResult, ReconciliationResult } from "../src/web/core/types";
+import { Dataset, FieldComparisonResult } from "../src/web/core/types";
+import { resultFromComparisons } from "./support/results";
 
 // Code-point order: "B" (U+42) < "a" (U+61) < "z" (U+7A) < "ä" (U+E4) < U+FFFD < U+1F600.
 // Locale collation puts a/B and ä/z the other way; UTF-16 code-unit order puts
@@ -31,11 +32,7 @@ const mismatch = (fieldName: string, left: string | null, right: string | null):
   leftCanonicalValue: null, rightCanonicalValue: null,
   status: left === null ? "left_null" : "mismatch", mappingName: null,
 });
-const resultOf = (fieldResults: FieldComparisonResult[]): ReconciliationResult => ({
-  leftDataset: { name: "l", recordCount: 0, columnCount: 0 },
-  rightDataset: { name: "r", recordCount: 0, columnCount: 0 },
-  identityResults: [], fieldResults,
-});
+const resultOf = (fieldResults: FieldComparisonResult[]) => resultFromComparisons(fieldResults);
 
 describe("shared code-point comparator", () => {
   it("orders by Unicode code point, not locale or UTF-16 code unit", () => {

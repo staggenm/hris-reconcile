@@ -1,12 +1,14 @@
+import { AppError, serializeError } from "./core/errors";
+import { checkFileSize } from "./core/limits";
 import { ReconciliationEngine } from "./core/reconciliation";
 import { Dataset, DatasetSummary, IdentityNormalizerName, ReconciliationContract } from "./core/types";
-import { parseCsvContent } from "./analysis/csv";
-import { profileDataset } from "./analysis/profiling";
+import { CsvEncoding, parseCsvContent } from "./analysis/csv";
+import { DatasetAnalysis } from "./analysis/dataset_analysis";
 import { scoreIdentityPair, suggestIdentity } from "./analysis/suggestions";
 import { analyzeObservedPairs } from "./analysis/mapping_analysis";
-import { aggregateMismatchesByField, aggregateMismatchesByPair, computeResultsSummary, mismatchDetails, isDiscrepancy } from "./analysis/results_analysis";
-import { generateReconciliationCsv, generateReconciliationJson } from "./core/export";
-import { FieldComparisonResult, ReconciliationResult } from "./core/types";
+import { aggregateMismatchesByField, aggregateMismatchesByPair, computeResultsSummary, mismatchDetails, matchingDetailsPage } from "./analysis/results_analysis";
+import { csvChunks, exportBlob, jsonChunks } from "./core/export";
+import { ReconciliationResult } from "./core/types";
 
 interface BaseRequest { requestId: number; sessionGeneration: number }
 interface ReconcileRequest extends BaseRequest {
@@ -21,6 +23,7 @@ interface ParseRequest extends BaseRequest {
   type: "parse";
   name: string;
   side: "left" | "right";
+  encoding: CsvEncoding;
   content: ArrayBuffer;
 }
 interface ResultRequest extends BaseRequest {
@@ -48,12 +51,17 @@ type WorkerRequest = ReconcileRequest | ParseRequest | ResultRequest;
 let latestResult: ReconciliationResult | null = null;
 let latestContract: ReconciliationContract | null = null;
 let latestResultId = 0;
-const sessionDatasets = new Map<number, Partial<Record<"left" | "right", Dataset>>>();
+// One cached analysis (dataset + column profiles + value sets) per side per session.
+const sessionAnalyses = new Map<number, Partial<Record<"left" | "right", DatasetAnalysis>>>();
+
+function getAnalysis(session: number, side: "left" | "right"): DatasetAnalysis {
+  const analysis = sessionAnalyses.get(session)?.[side];
+  if (!analysis) throw new AppError("SESSION_STATE", `upload the ${side} dataset first`);
+  return analysis;
+}
 
 function getDataset(session: number, side: "left" | "right"): Dataset {
-  const dataset = sessionDatasets.get(session)?.[side];
-  if (!dataset) throw new Error(`upload the ${side} dataset first`);
-  return dataset;
+  return getAnalysis(session, side).dataset;
 }
 
 function pageRows<T>(rows: T[], page: number, pageSize: number) {
@@ -66,10 +74,12 @@ self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
     if (request.type === "parse") {
       latestResult = null;
       latestContract = null;
-      const dataset = parseCsvContent(request.content, request.name);
-      const cached = sessionDatasets.get(request.sessionGeneration) ?? {};
-      cached[request.side] = dataset;
-      sessionDatasets.set(request.sessionGeneration, cached);
+      checkFileSize(request.name, request.content.byteLength);
+      const dataset = parseCsvContent(request.content, request.name, { encoding: request.encoding });
+      const analysis = new DatasetAnalysis(dataset);
+      const cached = sessionAnalyses.get(request.sessionGeneration) ?? {};
+      cached[request.side] = analysis;
+      sessionAnalyses.set(request.sessionGeneration, cached);
       const summary: DatasetSummary = {
         name: dataset.name,
         columns: dataset.columns,
@@ -79,16 +89,16 @@ self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
       self.postMessage({
         type: "parse-result", requestId: request.requestId,
         sessionGeneration: request.sessionGeneration,
-        payload: { summary, profiles: profileDataset(dataset) },
+        payload: { summary, profiles: analysis.profiles() },
       });
       return;
     }
     if (request.type === "suggest-identity") {
-      self.postMessage({ type: "suggest-identity-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: suggestIdentity(getDataset(request.sessionGeneration, "left"), getDataset(request.sessionGeneration, "right")) });
+      self.postMessage({ type: "suggest-identity-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: suggestIdentity(getAnalysis(request.sessionGeneration, "left"), getAnalysis(request.sessionGeneration, "right")) });
       return;
     }
     if (request.type === "score-identity") {
-      self.postMessage({ type: "score-identity-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: scoreIdentityPair(getDataset(request.sessionGeneration, "left"), getDataset(request.sessionGeneration, "right"), { left_column: request.leftColumn ?? "", right_column: request.rightColumn ?? "" }) });
+      self.postMessage({ type: "score-identity-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: scoreIdentityPair(getAnalysis(request.sessionGeneration, "left"), getAnalysis(request.sessionGeneration, "right"), { left_column: request.leftColumn ?? "", right_column: request.rightColumn ?? "" }) });
       return;
     }
     if (request.type === "mapping-evidence") {
@@ -96,36 +106,39 @@ self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
       return;
     }
     if (request.type === "pairs") {
-      if (!latestResult || !request.fieldName) throw new Error("run reconciliation first");
-      if (request.resultId !== latestResultId) throw new Error("results changed; run reconciliation again");
+      if (!latestResult || !request.fieldName) throw new AppError("SESSION_STATE", "run reconciliation first");
+      if (request.resultId !== latestResultId) throw new AppError("SESSION_STATE", "results changed; run reconciliation again");
       const rows = aggregateMismatchesByPair(latestResult, { fieldName: request.fieldName });
       self.postMessage({ type: "pairs-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: pageRows(rows, request.page ?? 0, request.pageSize ?? 100) });
       return;
     }
     if (request.type === "details" || request.type === "matching-details") {
-      if (!latestResult) throw new Error("run reconciliation first");
-      if (request.resultId !== latestResultId) throw new Error("results changed; run reconciliation again");
-      let rows: FieldComparisonResult[];
-      if (request.type === "matching-details") {
-        rows = latestResult.fieldResults.filter((row) => ["match_exact", "match_normalized", "match_mapped", "both_null"].includes(row.status));
-      } else {
-        rows = mismatchDetails(latestResult, {
+      if (!latestResult) throw new AppError("SESSION_STATE", "run reconciliation first");
+      if (request.resultId !== latestResultId) throw new AppError("SESSION_STATE", "results changed; run reconciliation again");
+      const page = request.page ?? 0;
+      const pageSize = request.pageSize ?? 100;
+      const payload = request.type === "matching-details"
+        ? matchingDetailsPage(latestResult, { page, pageSize })
+        : pageRows(mismatchDetails(latestResult, {
           fieldName: request.fieldName ?? "",
           leftValue: request.leftValue, rightValue: request.rightValue,
           filterLeft: request.filterLeft, filterRight: request.filterRight,
-        });
-      }
-      self.postMessage({ type: `${request.type}-result`, requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: pageRows(rows, request.page ?? 0, request.pageSize ?? 100) });
+        }), page, pageSize);
+      self.postMessage({ type: `${request.type}-result`, requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload });
       return;
     }
     if (request.type === "export") {
-      if (!latestResult || !latestContract || !request.format) throw new Error("run reconciliation first");
-      if (request.resultId !== latestResultId) throw new Error("results changed; run reconciliation again");
-      const content = request.format === "full.csv" ? generateReconciliationCsv(latestResult, { excelSafe: request.excelSafe ?? true }) : request.format === "mismatches.csv" ? generateReconciliationCsv(latestResult, { mismatchesOnly: true, excelSafe: request.excelSafe ?? true }) : generateReconciliationJson(latestContract, latestResult);
-      self.postMessage({ type: "export-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: content });
+      if (!latestResult || !latestContract || !request.format) throw new AppError("SESSION_STATE", "run reconciliation first");
+      if (request.resultId !== latestResultId) throw new AppError("SESSION_STATE", "results changed; run reconciliation again");
+      // Chunks → Blob; posting a Blob shares it by reference instead of copying a string.
+      const excelSafe = request.excelSafe ?? true;
+      const blob = request.format === "report.json"
+        ? exportBlob(jsonChunks(latestContract, latestResult), "application/json;charset=utf-8")
+        : exportBlob(csvChunks(latestResult, { mismatchesOnly: request.format === "mismatches.csv", excelSafe }), "text/csv;charset=utf-8");
+      self.postMessage({ type: "export-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: blob });
       return;
     }
-    if (request.type !== "reconcile") throw new Error("unknown worker operation");
+    if (request.type !== "reconcile") throw new AppError("WORKER_PROTOCOL", "unknown worker operation");
     const leftDataset = getDataset(request.sessionGeneration, "left");
     const rightDataset = getDataset(request.sessionGeneration, "right");
     leftDataset.name = request.contract.left.name;
@@ -134,10 +147,11 @@ self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
     latestResult = result;
     latestContract = request.contract;
     latestResultId++;
+    const summary = computeResultsSummary(result);
     const dashboard = {
-      summary: computeResultsSummary(result),
+      summary,
       fields: aggregateMismatchesByField(result),
-      matchingCount: result.fieldResults.filter((row) => !isDiscrepancy(row)).length,
+      matchingCount: summary.metrics.field_matches,
       resultId: latestResultId,
     };
     self.postMessage({
@@ -151,7 +165,7 @@ self.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
       type: request.type === "parse" ? "parse-error" : "reconcile-error",
       requestId: request.requestId,
       sessionGeneration: request.sessionGeneration,
-      error: error instanceof Error ? error.message : String(error),
+      error: serializeError(error),
     });
   }
 });

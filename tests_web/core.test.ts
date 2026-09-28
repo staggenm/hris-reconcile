@@ -300,8 +300,9 @@ describe("Reconciliation Engine", () => {
     expect(result.identityResults.find((r) => r.identity === "002")?.status).toBe("missing_right");
     expect(result.identityResults.find((r) => r.identity === "003")?.status).toBe("missing_left");
 
-    expect(result.fieldResults).toHaveLength(1);
-    expect(result.fieldResults[0].identity).toBe("001");
-    expect(result.fieldResults[0].status).toBe("match_normalized");
+    const comparisons = [...result.fieldResults()];
+    expect(comparisons).toHaveLength(1);
+    expect(comparisons[0].identity).toBe("001");
+    expect(comparisons[0].status).toBe("match_normalized");
   });
 });

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { analyzeObservedPairs } from "../src/web/analysis/mapping_analysis";
 import { aggregateMismatchesByPair, mismatchDetails } from "../src/web/analysis/results_analysis";
-import { Dataset, FieldComparisonResult, ReconciliationResult } from "../src/web/core/types";
+import { Dataset, FieldComparisonResult } from "../src/web/core/types";
+import { resultFromComparisons } from "./support/results";
 
 // Pairs whose old template-string keys ("<null>" sentinel, "|||" separator) collided.
 const COLLIDING: Array<[string | null, string | null]> = [
@@ -29,11 +30,7 @@ describe("collision-free composite keys", () => {
       leftCanonicalValue: null, rightCanonicalValue: null,
       status: leftValue === null ? "left_null" : "mismatch", mappingName: null,
     }));
-    const result: ReconciliationResult = {
-      leftDataset: { name: "l", recordCount: 4, columnCount: 2 },
-      rightDataset: { name: "r", recordCount: 4, columnCount: 2 },
-      identityResults: [], fieldResults,
-    };
+    const result = resultFromComparisons(fieldResults);
     const pairs = aggregateMismatchesByPair(result, { fieldName: "v" });
     expect(pairs).toHaveLength(4);
     expect(pairs.every((pair) => pair.employee_count === 1)).toBe(true);

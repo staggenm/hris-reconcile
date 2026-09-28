@@ -82,6 +82,9 @@ function cspHashes(): Plugin {
 export default defineConfig({
   root: "src/web",
   plugins: [entryCsp(), viteSingleFile(), cspHashes()],
+  define: {
+    __HRIS_BENCH__: JSON.stringify(process.env.HRIS_BENCH === "1"),
+  },
   build: {
     outDir: resolve(__dirname, "dist"),
     emptyOutDir: false,

@@ -98,9 +98,18 @@ export interface DatasetStatistics {
   columnCount: number;
 }
 
+export type FieldStatusCounts = Record<FieldComparisonStatus, number>;
+
+// Summary-first: full records are kept only for non-matching comparisons;
+// matches are counts. fieldResults() recomputes the complete sequence
+// (matches included) from the datasets and contract each time it is iterated.
 export interface ReconciliationResult {
   leftDataset: DatasetStatistics;
   rightDataset: DatasetStatistics;
   identityResults: IdentityResult[];
-  fieldResults: FieldComparisonResult[];
+  // Non-matching comparisons, in canonical order (identity order, then field order).
+  discrepancies: FieldComparisonResult[];
+  // Status counts per field, in contract field order.
+  fieldCounts: Map<string, FieldStatusCounts>;
+  fieldResults(): Iterable<FieldComparisonResult>;
 }

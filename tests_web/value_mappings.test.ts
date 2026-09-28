@@ -57,7 +57,7 @@ describe("grouped value mappings", () => {
     const left: Dataset = { name: "a", columns: ["id", "status"], records: [{ id: "1", status: "FT" }, { id: "2", status: "F" }] };
     const right: Dataset = { name: "b", columns: ["id", "status"], records: [{ id: "1", status: "Full" }, { id: "2", status: "Full" }] };
     const result = new ReconciliationEngine().reconcile({ contract, leftDataset: left, rightDataset: right });
-    expect(result.fieldResults.map((item) => [item.status, item.leftCanonicalValue])).toEqual([
+    expect([...result.fieldResults()].map((item) => [item.status, item.leftCanonicalValue])).toEqual([
       ["match_mapped", "FULL"], ["match_mapped", "FULL"],
     ]);
   });

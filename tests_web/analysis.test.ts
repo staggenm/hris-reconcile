@@ -13,10 +13,7 @@ import {
   computeResultsSummary,
 } from "../src/web/analysis/results_analysis";
 import { buildContract } from "../src/web/core/contract_builder";
-import {
-  generateReconciliationCsv,
-  generateReconciliationJson,
-} from "../src/web/core/export";
+import { generateReconciliationCsv, generateReconciliationJson } from "./support/exports";
 import { ReconciliationEngine } from "../src/web/core/reconciliation";
 
 describe("CSV Parser", () => {

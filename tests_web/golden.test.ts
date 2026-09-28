@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseCsvContent } from "../src/web/analysis/csv";
-import { generateReconciliationCsv, generateReconciliationJson } from "../src/web/core/export";
+import { generateReconciliationCsv, generateReconciliationJson } from "./support/exports";
 import { ReconciliationEngine } from "../src/web/core/reconciliation";
 import { MappingConfig, ReconciliationContract } from "../src/web/core/types";
 

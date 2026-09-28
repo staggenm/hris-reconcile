@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { computeResultsSummary } from "../src/web/analysis/results_analysis";
-import { generateReconciliationCsv, generateReconciliationJson } from "../src/web/core/export";
+import { generateReconciliationCsv, generateReconciliationJson } from "./support/exports";
 import { reconcileIdentities } from "../src/web/core/identity";
 import { ReconciliationEngine } from "../src/web/core/reconciliation";
 import { Dataset, ReconciliationContract } from "../src/web/core/types";
@@ -36,7 +36,7 @@ describe("MISSING_IDENTITY", () => {
 
   it("does not abort the run and counts missing identities in the summary", () => {
     const result = new ReconciliationEngine().reconcile({ contract, leftDataset: left, rightDataset: right });
-    expect(result.fieldResults).toHaveLength(1);
+    expect([...result.fieldResults()]).toHaveLength(1);
     const summary = computeResultsSummary(result);
     expect(summary.identity_counts.missing_identity_left).toBe(3);
     expect(summary.identity_counts.missing_identity_right).toBe(1);
@@ -47,7 +47,7 @@ describe("MISSING_IDENTITY", () => {
     const l = dataset("left", [["1", " "], ["2", " "]]);
     const r = dataset("right", [["1", " "], ["2", null]]);
     const result = new ReconciliationEngine().reconcile({ contract, leftDataset: l, rightDataset: r });
-    expect(result.fieldResults.map((item) => item.status)).toEqual(["match_exact", "right_null"]);
+    expect([...result.fieldResults()].map((item) => item.status)).toEqual(["match_exact", "right_null"]);
   });
 
   it("exports missing identities in CSV and a schema-valid JSON report", () => {

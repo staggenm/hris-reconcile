@@ -14,7 +14,8 @@ function statusFor(mode: ComparisonMode): string {
   });
   const left: Dataset = { name: "a", columns: ["id", "name"], records: [{ id: "1", name: PRECOMPOSED }] };
   const right: Dataset = { name: "b", columns: ["id", "name"], records: [{ id: "1", name: DECOMPOSED }] };
-  return new ReconciliationEngine().reconcile({ contract, leftDataset: left, rightDataset: right }).fieldResults[0].status;
+  const result = new ReconciliationEngine().reconcile({ contract, leftDataset: left, rightDataset: right });
+  return [...result.fieldResults()][0].status;
 }
 
 describe("Unicode NFC", () => {

@@ -1,3 +1,4 @@
+import { AppError } from "../core/errors";
 import { ObservedPair } from "../analysis/mapping_analysis";
 import { ValueMappingSelection } from "../core/contract_builder";
 
@@ -48,14 +49,14 @@ export function inputFromValue(value: string | null): string {
 export function selectionsFromRows(fieldLabel: string, rows: MappingEditorRow[]): ValueMappingSelection[] {
   const accepted = rows.filter((row) => row.accepted);
   if (accepted.length === 0) {
-    throw new Error(`confirm at least one value mapping for '${fieldLabel}'`);
+    throw new AppError("MAPPING_INCOMPLETE", `confirm at least one value mapping for '${fieldLabel}'`);
   }
   return accepted.map((row) => {
     if (row.left === null || row.right === null) {
-      throw new Error(`accepted mappings for '${fieldLabel}' require a value on both sides`);
+      throw new AppError("MAPPING_INCOMPLETE", `accepted mappings for '${fieldLabel}' require a value on both sides`);
     }
     if (!row.canonical.trim()) {
-      throw new Error(`accepted mappings for '${fieldLabel}' require a canonical value`);
+      throw new AppError("MAPPING_INCOMPLETE", `accepted mappings for '${fieldLabel}' require a canonical value`);
     }
     return { canonical_value: row.canonical, left_values: [row.left], right_values: [row.right] };
   });
