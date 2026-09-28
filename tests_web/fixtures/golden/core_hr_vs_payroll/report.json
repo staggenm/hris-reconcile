@@ -1,8 +1,9 @@
 {
   "report_format_version": "2.0",
   "run_metadata": {
-    "app_version": "1.0.0",
+    "app_version": "2.0.0",
     "generated_at": "2026-01-01T00:00:00.000Z",
+    "contract_sha256": "913855967b0745bcc70e4c1b5c454efb877aa7a90cb87e15ab31b40782ea1d6c",
     "processing_mode": "browser",
     "excel_safe": true,
     "limits": {

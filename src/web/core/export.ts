@@ -5,7 +5,7 @@ import {
   ReconciliationResult,
 } from "./types";
 import type { CsvEncoding } from "../analysis/csv";
-import { serializeContract } from "./contract_document";
+import { contractSha256, serializeContract } from "./contract_document";
 import { DEFAULT_LIMITS, Limits } from "./limits";
 import { FIELD_STATUSES, IDENTITY_PUBLIC } from "./status";
 import { APP_VERSION } from "./version";
@@ -313,6 +313,7 @@ export function jsonChunks(
     run_metadata: {
       app_version: metadata.appVersion,
       generated_at: metadata.generatedAt,
+      contract_sha256: contractSha256(contract),
       processing_mode: "browser",
       excel_safe: metadata.excelSafe,
       limits: {

@@ -1,9 +1,11 @@
 import type { MappingEditorRow } from "../ui/mapping_editor";
+import { compareCodePoints } from "./compare";
 import { NORMALIZED_TEXT_CHAIN } from "./contract_builder";
 import { AppError } from "./errors";
 import { validateIdentityNormalizers } from "./identity";
 import { validateMapping } from "./mapping";
 import { NORMALIZERS } from "./normalization";
+import { sha256HexSync } from "./sha256";
 import {
   ComparisonMode,
   FieldConfig,
@@ -184,4 +186,24 @@ export function wizardStateFromContract(contract: ReconciliationContract): Wizar
     fields,
     mappingRows,
   };
+}
+
+// Canonical JSON: object keys sorted by code point, arrays in order, no
+// whitespace. Equal contracts always produce the same text, and so the same hash.
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const keys = Object.keys(value).sort(compareCodePoints);
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function canonicalContractJson(contract: ReconciliationContract): string {
+  return canonicalJson(serializeContract(contract));
+}
+
+// SHA-256 of the canonical contract document, recorded in the report.
+export function contractSha256(contract: ReconciliationContract): string {
+  return sha256HexSync(new TextEncoder().encode(canonicalContractJson(contract)));
 }

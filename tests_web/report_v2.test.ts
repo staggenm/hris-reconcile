@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseCsvContent } from "../src/web/analysis/csv";
 import { buildContract } from "../src/web/core/contract_builder";
-import { serializeContract } from "../src/web/core/contract_document";
+import { contractSha256, serializeContract } from "../src/web/core/contract_document";
 import { buildReportMetadata } from "../src/web/core/export";
 import { DEFAULT_LIMITS } from "../src/web/core/limits";
 import { ReconciliationEngine } from "../src/web/core/reconciliation";
@@ -35,6 +35,7 @@ describe("JSON report format 2.0", () => {
     expect(report.run_metadata).toEqual({
       app_version: APP_VERSION,
       generated_at: "2026-09-28T12:30:05.007Z",
+      contract_sha256: contractSha256(contract),
       processing_mode: "browser",
       excel_safe: false,
       limits: {

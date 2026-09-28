@@ -1,6 +1,6 @@
 {
   "name": "hris-reconcile-web",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Pure in-browser client-side HRIS reconciliation engine",
   "private": true,
   "engines": {

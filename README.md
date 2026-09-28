@@ -185,8 +185,9 @@ The JSON report (format 2.0, `schemas/report-2.0.schema.json`) is the audit
 record of a run:
 
 - `report_format_version`, and `run_metadata` with the app version (from
-  `package.json`), `generated_at` (ISO-8601 UTC), the CSV formula-neutralization
-  setting (`excel_safe`), and the limits in effect.
+  `package.json`), `generated_at` (ISO-8601 UTC), `contract_sha256` (SHA-256
+  of the canonical contract JSON: keys sorted by code point, no whitespace), the
+  CSV formula-neutralization setting (`excel_safe`), and the limits in effect.
 - `sources`: for each file, the logical name, file name, encoding, byte length,
   shape, and a SHA-256 of the raw bytes computed before decoding.
 - `contract`: the full contract (identity and its normalizers, fields and
@@ -281,6 +282,26 @@ retained heap, and export sizes to `test-results/bench/`.
 CSV empty cells become explicit nulls. Identity fields receive no implicit
 normalization. If an identity is duplicated, it is reported and excluded from
 field comparison because any pairing would be arbitrary.
+
+## Releases
+
+The version in `package.json` follows semantic versioning; 2.0.0 introduced
+report format 2.0. The build embeds that version (as `app_version` in reports)
+and nothing else about the build: no git commit hashes or build timestamps, so
+the same source always builds the same bytes.
+
+To release:
+
+1. Set the version: `npm version X.Y.Z --no-git-tag-version`.
+2. Follow the local flow (edit → `npm run build` → `npm run verify` → commit).
+   Regenerate the goldens if `app_version` appears in them.
+3. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+`.github/workflows/release.yml` runs on `v*` tags. It checks that the tag
+matches `package.json`, runs `npm run verify:ci` (so the committed
+`dist/hris-reconcile.html` must equal a fresh build), and publishes a GitHub
+release with `hris-reconcile.html` and `hris-reconcile.html.sha256`. Verify a
+download with `sha256sum -c hris-reconcile.html.sha256`.
 
 ## History
 
