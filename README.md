@@ -148,6 +148,114 @@ recorded in the contract. Duplicate detection runs on the normalized key, so
 `00012345` and `12345` in one dataset become a duplicate when leading zeros are
 stripped.
 
+## User guide
+
+Open `hris-reconcile.html` in a desktop browser (see Known limitations for
+versions). Everything happens in that tab; nothing is uploaded anywhere.
+
+### The six steps
+
+1. **Upload datasets.** Choose or drop two `.csv` files (Dataset A and B). Pick
+   the encoding first if the file came from Excel on Windows (Windows-1252);
+   UTF-8 is the default. Each file shows a five-row preview and a column profile.
+   You can rename each dataset's logical source name.
+2. **Match employees.** The workbench suggests the identity field on each side
+   and shows the evidence. Confirm or change it. Matching is exact unless you
+   tick identity normalization (trim whitespace, strip leading zeros, ignore
+   case). Rows with an empty identity are reported, not dropped. You can also
+   **Load saved contract** here to fill in every step at once.
+3. **Match fields.** Pair the fields to compare and choose a mode for each:
+   **Exact**, **Normalized text** (ignores Unicode form, surrounding and
+   repeated whitespace, and case), **Value mapping**, or **Ignore**.
+4. **Review value mappings.** For Value mapping fields, each observed value pair
+   is listed with how often it occurs. Accept the pairs that mean the same thing.
+   Rows that share a canonical value form one mapping (for example, `FT` and `F`
+   both meaning `Full`). The canonical value defaults to the Dataset B value.
+5. **Run comparison.** Name the reconciliation, run it, and optionally **Save
+   contract (JSON)** to repeat the same configuration later.
+6. **Explore discrepancies.** Summary tiles (red: problems, amber: needs
+   attention, green: fine), identity issues with their source rows, mismatches
+   by field, recurring value pairs, and an employee drill-down. Then download
+   the results.
+
+If you change an earlier step after later ones are done, the later steps are
+reset and the changed step says why (for example "Results reset because the
+value mappings changed."). Confirm it again to continue.
+
+### What each export contains
+
+| Export | Contents |
+|---|---|
+| **Full results CSV** | Every identity (matched or not) and every field comparison, with raw, normalized, and canonical values, status, and source row numbers. The complete record. |
+| **Mismatches only CSV** | Identity issues and differing comparisons only. |
+| **JSON report** | Run metadata (app version, time in UTC, contract hash, settings, limits), each source file's name, encoding, size, and SHA-256, the full contract, status counts for everything, and **details of identity issues and differences only** (`detail_scope` says so). Use `full.csv` when you need every matching comparison. |
+
+Row numbers are the line on which the record starts in its file (the header is
+line 1), so you can find the record in the original export.
+
+**Neutralize spreadsheet formulas in CSV exports** (on by default) protects
+against formula injection when a CSV is opened in Excel or similar: a cell
+starting with `=`, `+`, `-`, `@`, TAB, or CR is written with a leading `'`
+(plain numbers such as `-12` are left alone). Turn it off only if another program
+needs the exact values; the JSON report always contains the exact values.
+
+Exports may contain sensitive HR data. Store and share them accordingly.
+
+### Limits
+
+Checked before the work starts (or, for differences, while it runs):
+
+| Limit | Value | Error code |
+|---|---|---|
+| File size | 100 MB | `LIMIT_FILE_SIZE` |
+| Rows per file | 200,000 | `LIMIT_ROWS` |
+| Columns per file | 200 | `LIMIT_COLUMNS` |
+| Cells (rows × columns) per file | 8,000,000 | `LIMIT_CELLS` |
+| Comparisons (smaller row count × fields) | 6,000,000 | `LIMIT_COMPARISONS` |
+| Stored differences | 1,500,000 | `LIMIT_DISCREPANCIES` |
+
+`LIMIT_DISCREPANCIES` almost always means the identity field or a value mapping
+is wrong: check the configuration before rerunning. For larger data, split the
+files (for example by company or country) and reconcile the parts.
+
+### Error codes
+
+Every error shows a code next to the message.
+
+| Code | Meaning |
+|---|---|
+| `FILE_TYPE` | The file is not a `.csv` file. |
+| `CSV_EMPTY` | The file has no header or no data rows. |
+| `CSV_ENCODING` | The file is not valid in the chosen encoding. Try Windows-1252 for Excel exports. |
+| `CSV_HEADER` | The header is missing or has an empty column name. |
+| `CSV_DUP_HEADER` | The header repeats a column name. |
+| `CSV_ROW_WIDTH` | A row has a different number of values than the header (often an unquoted comma or line break). |
+| `CSV_PARSE` | The CSV structure could not be read. |
+| `LIMIT_*` | A limit above was exceeded. |
+| `CONTRACT_INVALID` | The configuration is incomplete or inconsistent, or a loaded contract file is malformed. |
+| `COLUMNS_MISSING` | A loaded contract needs columns the uploaded files do not have (the message names them). |
+| `NORMALIZER_UNKNOWN`, `IDENTITY_NORMALIZER_UNSUPPORTED` | A contract names a normalizer that does not exist or is not allowed for identities. |
+| `IDENTITY_COLUMN_UNKNOWN` | The chosen identity column does not exist. |
+| `MAPPING_CONFLICT` | Two accepted mapping rows give one value different canonical values (the message names both rows). |
+| `MAPPING_AMBIGUOUS`, `MAPPING_INCOMPLETE`, `MAPPING_NOT_FOUND` | A value mapping is contradictory, lacks a value, or is missing. |
+| `SESSION_STATE` | The action does not fit the current session (for example, results changed); run again. |
+| `WORKER_CRASHED` | Processing stopped, most likely out of memory; the session was reset (see Known limitations). |
+| `WORKER_PROTOCOL`, `INTERNAL`, `UNKNOWN` | Unexpected internal errors. Please report them with the steps that led there. |
+
+### Verifying a release download
+
+Each release has `hris-reconcile.html` and `hris-reconcile.html.sha256`. Compare
+the hash of your download with the one in the `.sha256` file:
+
+- **Windows** (Command Prompt or PowerShell):
+  `certutil -hashfile hris-reconcile.html SHA256`
+  The printed hash must equal the first value in `hris-reconcile.html.sha256`
+  (certutil prints it in lower case without spaces in current Windows versions).
+- **macOS**: `shasum -a 256 -c hris-reconcile.html.sha256` (prints
+  `hris-reconcile.html: OK`), or `shasum -a 256 hris-reconcile.html` to show the
+  hash.
+- **Linux**: `sha256sum -c hris-reconcile.html.sha256`.
+
 ## Verification
 
 ```bash
@@ -293,6 +401,39 @@ retained heap, and export sizes to `test-results/bench/`.
 CSV empty cells become explicit nulls. Identity fields receive no implicit
 normalization. If an identity is duplicated, it is reported and excluded from
 field comparison because any pairing would be arbitrary.
+
+## Known limitations
+
+- **Identity suggestion at scale.** After both files load, the workbench scores
+  every column pair to suggest the identity field. At 200,000 rows × 31 columns
+  this takes about 6 s on an Apple M5 (`npm run bench`); expect it to take
+  several times longer on typical corporate laptops. A progress toast is shown
+  and the page stays responsive, because the work runs in a background worker.
+- **Memory on low-RAM machines.** All processing happens in one browser worker,
+  whose memory the browser caps (often 2–4 GB, depending on the machine; not
+  measured here). Measured worker memory at 200,000 rows × 30 fields: retained
+  about 630 MB and peak about 1.0 GB with 5% differences; retained 743 MB and
+  peak 1.4 GB at the maximum of about 1.44 million differences. If the browser
+  runs out of memory, the workbench shows `WORKER_CRASHED` ("Processing
+  stopped (likely memory). Session reset.") and starts over; no partial results
+  are kept. On machines with 8 GB of RAM or less, close other tabs, or split
+  large files.
+- **Browser requirements.** A current desktop browser that can open local
+  HTML files, run Blob-URL workers, and download Blobs:
+
+  | Browser | Minimum | Why |
+  |---|---|---|
+  | Chrome / Edge | 111 | CSS `color-mix()` (the theme) |
+  | Firefox | 113 | CSS `color-mix()` |
+  | Safari | 16.4 | Regular-expression lookbehind in the processing worker; older Safari cannot start the worker |
+
+  `:has()` (Chrome/Edge 105, Firefox 121, Safari 15.4) and
+  `content-visibility` (Chrome/Edge 85, Firefox 125, Safari 18) are optional
+  enhancements; without them the layout is only slightly different. Opening the
+  file from disk (`file://`) works in all three engines; some managed
+  (corporate) browser policies block local files, Blob workers, or downloads,
+  and then the workbench cannot run. Tested with Chromium 153, Firefox 155, and
+  WebKit 26.6 (Playwright 1.63).
 
 ## Releases
 
