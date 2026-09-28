@@ -5,11 +5,13 @@ import { ColumnProfile } from "./analysis/profiling";
 import { suggestFieldMappings } from "./analysis/suggestions";
 import { ObservedPair } from "./analysis/mapping_analysis";
 import {
+  IdentityIssue,
   PairMismatchSummary,
   ResultsSummary,
   FieldMismatchSummary,
 } from "./analysis/results_analysis";
 import { buildContract, FieldSelection } from "./core/contract_builder";
+import { parseContractDocument, serializeContract, validateContractColumns, wizardStateFromContract } from "./core/contract_document";
 import {
   inputFromValue,
   manualRow,
@@ -157,7 +159,7 @@ function invalidateAfterUpload(): void {
   state.contract = null;
   state.result = null;
   state.resultPairs = [];
-  for (const selector of ["#identity-suggestion", "#identity-evidence", "#field-rows", "#mapping-editors", "#run-summary", "#metrics", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
+  for (const selector of ["#identity-suggestion", "#identity-evidence", "#field-rows", "#mapping-editors", "#run-summary", "#metrics", "#identity-issues", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
     $(selector).replaceChildren();
   }
   for (const selector of ["#identity-confirmed", "#fields-confirmed", "#mappings-confirmed"]) show(selector, false);
@@ -187,7 +189,7 @@ async function upload(side: "left" | "right", file: File): Promise<void> {
     if (session !== sessionGeneration || request !== uploadGeneration[side]) return;
     const name = file.name.replace(/\.[^/.]+$/, "") || side.toUpperCase();
     const encoding = ($(`#${side}-encoding`) as HTMLSelectElement).value as CsvEncoding;
-    const parsed = await parseAndProfileInWorker({ content: buffer, name, side, encoding, sessionGeneration: session });
+    const parsed = await parseAndProfileInWorker({ content: buffer, name, fileName: file.name, side, encoding, sessionGeneration: session });
     if (session !== sessionGeneration || request !== uploadGeneration[side]) return;
     const { summary, profiles } = parsed;
     state[side] = summary;
@@ -421,7 +423,7 @@ function invalidateResults(): void {
   state.result = null;
   state.resultPairs = [];
   show("#step-results", false);
-  for (const selector of ["#metrics", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
+  for (const selector of ["#metrics", "#identity-issues", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
     $(selector).replaceChildren();
   }
   show("#pair-panel", false);
@@ -681,11 +683,82 @@ async function runReconciliation(): Promise<void> {
   state.contract = contract;
   state.result = dashboard;
   renderMetrics(dashboard.summary);
+  loadIdentityIssues(0).catch(showError);
   renderFieldSummary(dashboard.fields);
   $("#matching-summary").replaceChildren(node("p", `${dashboard.matchingCount.toLocaleString()} matching comparisons. Expand to load details.`, "caption"));
 
   show("#step-results");
   $("#step-results").scrollIntoView({ behavior: "smooth" });
+}
+
+async function loadIdentityIssues(pageNumber: number): Promise<void> {
+  if (!state.result) return;
+  const page = await queryWorker<WorkerPage<IdentityIssue>>("identity-issues", { page: pageNumber, pageSize: 100, resultId: state.result.resultId }, sessionGeneration);
+  if (!state.result) return;
+  if (page.total === 0) {
+    $("#identity-issues").replaceChildren(node("p", "Every identity matched exactly once on both sides.", "message"));
+    return;
+  }
+  $("#identity-issues").replaceChildren(loadRemoteTable(
+    [
+      { label: "Employee identity", value: (row) => display(row.identity) },
+      { label: "Status", value: (row) => row.status },
+      { label: "Dataset A rows", value: (row) => row.left_rows.join(", ") },
+      { label: "Dataset B rows", value: (row) => row.right_rows.join(", ") },
+    ],
+    page,
+    "Identity issues",
+    (nextPage) => loadIdentityIssues(nextPage).catch(showError),
+  ));
+}
+
+function saveContract(): void {
+  const contract = buildCurrentContract();
+  const text = `${JSON.stringify(serializeContract(contract), null, 2)}\n`;
+  saveBlob(new Blob([text], { type: "application/json;charset=utf-8" }), `${contract.name}.contract.json`);
+}
+
+// Imports a saved contract into the current session: validates it against the
+// uploaded columns, then pre-fills every wizard step up to "Run comparison".
+async function loadContract(file: File): Promise<void> {
+  if (!state.left || !state.right) throw new AppError("SESSION_STATE", "upload both datasets before loading a contract");
+  let input: unknown;
+  try {
+    input = JSON.parse(await file.text());
+  } catch {
+    throw new AppError("CONTRACT_INVALID", `'${file.name}' is not valid JSON`);
+  }
+  const contract = parseContractDocument(input);
+  validateContractColumns(contract, state.left.columns, state.right.columns);
+  const wizard = wizardStateFromContract(contract);
+
+  invalidateResults();
+  for (const side of ["left", "right"] as const) {
+    const summary = state[side]!;
+    summary.name = contract[side].name;
+    const nameInput = document.querySelector<HTMLInputElement>(`#${side}-dataset input[type=text]`);
+    if (nameInput) nameInput.value = summary.name;
+  }
+  ($("#left-identity") as HTMLSelectElement).value = wizard.identity.left_column;
+  ($("#right-identity") as HTMLSelectElement).value = wizard.identity.right_column;
+  for (const input of identityNormalizerInputs()) input.checked = wizard.identity.normalize.includes(input.value as IdentityNormalizerName);
+  $("#identity-evidence").textContent = `Loaded contract '${contract.name}' from ${file.name}.`;
+  state.identity = wizard.identity;
+  show("#identity-confirmed");
+
+  state.fields = wizard.fields;
+  renderFieldRows();
+  show("#step-fields");
+  show("#fields-confirmed");
+
+  state.pairs = wizard.fields
+    .filter((field) => field.mode === "Value mapping")
+    .map((field) => ({ field: { left_column: field.left_column, right_column: field.right_column }, rows: wizard.mappingRows.get(field.left_column) ?? [] }));
+  renderMappingEditorsFromState();
+  show("#step-mappings");
+
+  confirmMappings();
+  ($("#contract-name") as HTMLInputElement).value = contract.name;
 }
 
 async function loadMatchingDetails(pageNumber: number): Promise<void> {
@@ -847,6 +920,8 @@ function resultDetailTable(page: WorkerPage<FieldComparisonResult>, label: strin
     [
       { label: "Employee identity", value: (row) => row.identity },
       { label: "Field", value: (row) => row.fieldName },
+      { label: "Dataset A row", value: (row) => row.leftLine },
+      { label: "Dataset B row", value: (row) => row.rightLine },
       { label: "Dataset A value", value: (row) => display(row.leftRawValue) },
       { label: "Dataset B value", value: (row) => display(row.rightRawValue) },
       { label: "Comparison status", value: (row) => row.status },
@@ -870,6 +945,10 @@ async function download(file: string): Promise<void> {
   // The worker streams the export into a Blob; no report-sized string reaches this thread.
   const excelSafe = ($("#excel-safe") as HTMLInputElement).checked;
   const blob = await queryWorker<Blob>("export", { format: file, resultId: state.result.resultId, excelSafe }, sessionGeneration);
+  saveBlob(blob, filename);
+}
+
+function saveBlob(blob: Blob, filename: string): void {
   const anchor = document.createElement("a");
   anchor.href = URL.createObjectURL(blob);
   const objectUrl = anchor.href;
@@ -901,7 +980,7 @@ function clearSession(): void {
 
   $("#left-dataset").replaceChildren();
   $("#right-dataset").replaceChildren();
-  for (const selector of ["#identity-suggestion", "#identity-evidence", "#field-rows", "#mapping-editors", "#run-summary", "#metrics", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
+  for (const selector of ["#identity-suggestion", "#identity-evidence", "#field-rows", "#mapping-editors", "#run-summary", "#metrics", "#identity-issues", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
     $(selector).replaceChildren();
   }
   ($( "#contract-name") as HTMLInputElement).value = "";
@@ -915,6 +994,7 @@ function clearSession(): void {
   chosenFiles.right = null;
   ($("#left-encoding") as HTMLSelectElement).value = "utf-8";
   ($("#right-encoding") as HTMLSelectElement).value = "utf-8";
+  ($("#contract-file") as HTMLInputElement).value = "";
   ($("#left-file") as HTMLInputElement).value = "";
   ($("#right-file") as HTMLInputElement).value = "";
 
@@ -992,6 +1072,14 @@ for (const input of identityNormalizerInputs()) {
   input.addEventListener("change", () => { void scoreIdentity().catch(showError); });
 }
 
+$("#contract-file").addEventListener("change", (event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  clearError();
+  if (file) loadContract(file).catch(showError);
+});
+
 // The worker held every dataset and result, so the whole session is gone:
 // reset the UI to step 1 instead of leaving steps that would fail with
 // "upload first".
@@ -1015,6 +1103,7 @@ bind("#add-field", "click", addField);
 bind("#confirm-fields", "click", confirmFields);
 bind("#confirm-mappings", "click", confirmMappings);
 bind("#run-reconciliation", "click", runReconciliation);
+bind("#save-contract", "click", saveContract);
 bind("#clear-session", "click", clearSession);
 bind("#quit-application", "click", quitApplication);
 

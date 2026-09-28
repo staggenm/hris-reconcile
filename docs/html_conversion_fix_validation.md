@@ -3,7 +3,7 @@
 > **Note (2026-09-28):** The Python engine has been retired. The Python parity and
 > fixture-generation steps described below are historical. They were replaced by the
 > golden-file tests (`tests_web/golden.test.ts`) and the web-owned report schema
-> (`schemas/report.schema.json`).
+> (`schemas/report-1.0.schema.json`, since superseded by `schemas/report-2.0.schema.json`).
 
 ## Findings and fixes
 

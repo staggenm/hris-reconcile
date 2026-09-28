@@ -3,8 +3,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseCsvContent } from "../src/web/analysis/csv";
 import { generateReconciliationCsv, generateReconciliationJson } from "./support/exports";
+import { parseContractDocument } from "../src/web/core/contract_document";
+import { buildReportMetadata } from "../src/web/core/export";
 import { ReconciliationEngine } from "../src/web/core/reconciliation";
-import { MappingConfig, ReconciliationContract } from "../src/web/core/types";
+import { sha256HexSync } from "../src/web/core/sha256";
 
 // Golden files are the reference output of the web engine. Regenerate them only
 // for an intended behaviour change, and list the diff in the phase report:
@@ -17,38 +19,28 @@ const CASES = [
   { name: "status_matrix", left: "left", right: "right" },
 ] as const;
 
-function toTypeScriptContract(source: Record<string, any>): ReconciliationContract {
-  const mappings: Record<string, MappingConfig> = Object.create(null);
-  for (const [name, entries] of Object.entries(source.value_mappings ?? {})) {
-    const mapping: MappingConfig = Object.create(null);
-    for (const [canonical, values] of Object.entries(entries as Record<string, any>)) {
-      mapping[canonical] = { left: [...values.left], right: [...values.right] };
-    }
-    mappings[name] = mapping;
-  }
-  return {
-    name: source.name,
-    left: { name: source.left.name }, right: { name: source.right.name },
-    identity: source.identity,
-    fields: source.fields.map((field: Record<string, any>) => ({
-      name: field.name, left: field.left, right: field.right,
-      normalize: field.normalize ?? [], valueMapping: field.value_mapping ?? null,
-    })),
-    valueMappings: mappings,
-  };
-}
+// Report metadata from the fixture files themselves; generated_at is fixed so
+// the golden report is reproducible.
+const GENERATED_AT = new Date(Date.UTC(2026, 0, 1));
 
 function runGoldenCase(testCase: (typeof CASES)[number]) {
   const directory = path.join(goldenRoot, testCase.name);
   const read = (file: string) => fs.readFileSync(path.join(directory, file), "utf8");
-  const contract = toTypeScriptContract(JSON.parse(read("contract.json")));
+  const source = (name: string) => {
+    const bytes = new Uint8Array(fs.readFileSync(path.join(directory, `${name}.csv`)));
+    return { fileName: `${name}.csv`, encoding: "utf-8" as const, sha256: sha256HexSync(bytes), byteLength: bytes.byteLength };
+  };
+  const contract = parseContractDocument(JSON.parse(read("contract.json")));
   const left = parseCsvContent(read(`${testCase.left}.csv`), testCase.left);
   const right = parseCsvContent(read(`${testCase.right}.csv`), testCase.right);
   const result = new ReconciliationEngine().reconcile({ contract, leftDataset: left, rightDataset: right });
+  const metadata = buildReportMetadata({
+    sources: { left: source(testCase.left), right: source(testCase.right) }, excelSafe: true, now: GENERATED_AT,
+  });
   return {
     directory,
     outputs: {
-      "report.json": generateReconciliationJson(contract, result),
+      "report.json": generateReconciliationJson(contract, result, metadata),
       "full.csv": generateReconciliationCsv(result),
       "mismatches.csv": generateReconciliationCsv(result, { mismatchesOnly: true }),
     },

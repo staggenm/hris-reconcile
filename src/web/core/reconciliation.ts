@@ -86,6 +86,8 @@ export class ReconciliationEngine {
             rightRecord: identityResult.rightRecord,
             field,
             valueMappings: contract.valueMappings,
+            leftLine: identityResult.leftLines[0],
+            rightLine: identityResult.rightLines[0],
           }, mappingResolvers.get(field));
         }
       }

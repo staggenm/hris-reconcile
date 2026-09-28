@@ -6,7 +6,7 @@ import {
 } from "../core/types";
 import { compareCodePoints, compareNullableCodePoints } from "../core/compare";
 
-import { DISCREPANCY_STATUSES, FIELD_STATUSES, isDiscrepancy } from "../core/status";
+import { DISCREPANCY_STATUSES, FIELD_STATUSES, IDENTITY_PUBLIC, isDiscrepancy } from "../core/status";
 
 export { DISCREPANCY_STATUSES, isDiscrepancy };
 
@@ -257,4 +257,28 @@ export function matchingDetailsPage(
     total++;
   }
   return { rows, total, page: options.page, pageSize: options.pageSize };
+}
+
+export interface IdentityIssue {
+  identity: string | null;
+  status: string;
+  left_rows: number[];
+  right_rows: number[];
+}
+
+// Every identity result except MATCHED, with public status names and source rows.
+export function identityIssuesPage(
+  result: ReconciliationResult,
+  options: { page: number; pageSize: number },
+): ResultPage<IdentityIssue> {
+  const issues = result.identityResults.filter((item) => item.status !== "matched");
+  const start = options.page * options.pageSize;
+  return {
+    rows: issues.slice(start, start + options.pageSize).map((item) => ({
+      identity: item.identity, status: IDENTITY_PUBLIC[item.status], left_rows: item.leftLines, right_rows: item.rightLines,
+    })),
+    total: issues.length,
+    page: options.page,
+    pageSize: options.pageSize,
+  };
 }

@@ -11,22 +11,44 @@ export class CsvParseError extends AppError {
   }
 }
 
-function rawCsvRecords(text: string): string[] {
+// Splits text into raw records (quote-aware) and records the physical line
+// on which each record starts. Line breaks inside quoted fields still advance
+// the physical line; CRLF counts as one break.
+function scanCsvRecords(text: string): { records: string[]; lines: number[] } {
   const records: string[] = [];
+  const lines: number[] = [];
   let quoted = false;
   let start = 0;
+  let line = 1;
+  let startLine = 1;
   for (let i = 0; i < text.length; i++) {
-    if (text[i] === '"') {
+    const character = text[i];
+    if (character === '"') {
       if (quoted && text[i + 1] === '"') { i++; continue; }
       quoted = !quoted;
-    } else if (!quoted && (text[i] === "\n" || text[i] === "\r")) {
-      records.push(text.slice(start, i));
-      if (text[i] === "\r" && text[i + 1] === "\n") i++;
-      start = i + 1;
+    } else if (character === "\n" || character === "\r") {
+      const crlf = character === "\r" && text[i + 1] === "\n";
+      if (!quoted) {
+        records.push(text.slice(start, i));
+        lines.push(startLine);
+      }
+      if (crlf) i++;
+      line++;
+      if (!quoted) {
+        start = i + 1;
+        startLine = line;
+      }
     }
   }
-  if (start < text.length) records.push(text.slice(start));
-  return records;
+  if (start < text.length) {
+    records.push(text.slice(start));
+    lines.push(startLine);
+  }
+  return { records, lines };
+}
+
+function rawCsvRecords(text: string): string[] {
+  return scanCsvRecords(text).records;
 }
 
 function countUnquoted(record: string, delimiter: string): number {
@@ -119,7 +141,7 @@ export function parseCsvContent(
   }
 
   const rows = parsed.data;
-  const rawRecords = rawCsvRecords(text);
+  const { records: rawRecords, lines: rawLines } = scanCsvRecords(text);
   if (!rows || rows.length === 0) {
     throw new CsvParseError("CSV_EMPTY", "CSV dataset is empty");
   }
@@ -155,6 +177,7 @@ export function parseCsvContent(
   checkColumns(name, header.length, limits);
 
   const records: RecordRow[] = [];
+  const recordLines: number[] = [];
   const expectedCols = header.length;
 
   for (let i = 1; i < rows.length; i++) {
@@ -178,6 +201,7 @@ export function parseCsvContent(
       record[header[c]] = val === "" || val === undefined ? null : val;
     }
     records.push(record);
+    recordLines.push(rawLines[i]);
   }
 
   if (records.length === 0) {
@@ -191,5 +215,6 @@ export function parseCsvContent(
     name,
     columns: header,
     records,
+    recordLines,
   };
 }

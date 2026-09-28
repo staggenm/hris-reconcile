@@ -28,7 +28,7 @@ describe("collision-free composite keys", () => {
       leftRawValue: leftValue, rightRawValue: rightValue,
       leftNormalizedValue: leftValue, rightNormalizedValue: rightValue,
       leftCanonicalValue: null, rightCanonicalValue: null,
-      status: leftValue === null ? "left_null" : "mismatch", mappingName: null,
+      leftLine: i + 2, rightLine: i + 2, status: leftValue === null ? "left_null" : "mismatch", mappingName: null,
     }));
     const result = resultFromComparisons(fieldResults);
     const pairs = aggregateMismatchesByPair(result, { fieldName: "v" });

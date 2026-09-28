@@ -5,7 +5,7 @@
 type Schema = Record<string, any>;
 
 const ANNOTATIONS = new Set(["$schema", "$id", "$defs", "title", "description"]);
-const ASSERTIONS = new Set(["$ref", "anyOf", "type", "properties", "required", "additionalProperties", "items", "enum", "const", "minimum"]);
+const ASSERTIONS = new Set(["$ref", "anyOf", "type", "properties", "required", "additionalProperties", "items", "enum", "const", "minimum", "pattern"]);
 
 function typeOf(value: unknown): string {
   if (value === null) return "null";
@@ -60,6 +60,9 @@ export function validateJsonSchema(schema: Schema, value: unknown): string[] {
     }
     if (node.enum !== undefined && !node.enum.includes(data)) {
       errors.push(`${pointer}: value not in enum`);
+    }
+    if (node.pattern !== undefined && typeof data === "string" && !new RegExp(node.pattern, "u").test(data)) {
+      errors.push(`${pointer}: does not match pattern ${node.pattern}`);
     }
     if (node.minimum !== undefined && typeof data === "number" && data < node.minimum) {
       errors.push(`${pointer}: below minimum ${node.minimum}`);

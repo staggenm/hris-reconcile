@@ -41,7 +41,7 @@ export interface WizardConfiguration {
   fields: FieldSelection[];
 }
 
-const NORMALIZED_TEXT_CHAIN: NormalizerName[] = [
+export const NORMALIZED_TEXT_CHAIN: NormalizerName[] = [
   "nfc",
   "trim",
   "collapse_whitespace",

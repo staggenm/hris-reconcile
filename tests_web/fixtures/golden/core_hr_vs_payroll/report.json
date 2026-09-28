@@ -1,21 +1,109 @@
 {
+  "report_format_version": "2.0",
   "run_metadata": {
-    "format_version": "1.0",
-    "engine_version": "0.3.0",
-    "processing_mode": "browser"
+    "app_version": "1.0.0",
+    "generated_at": "2026-01-01T00:00:00.000Z",
+    "processing_mode": "browser",
+    "excel_safe": true,
+    "limits": {
+      "max_file_bytes": 104857600,
+      "max_rows": 200000,
+      "max_columns": 200,
+      "max_cells": 8000000,
+      "max_comparisons": 6000000,
+      "max_discrepancies": 1500000
+    }
   },
-  "contract_name": "core_hr_vs_payroll",
-  "datasets": {
+  "sources": {
     "left": {
       "name": "core_hr",
+      "file_name": "core_hr.csv",
+      "encoding": "utf-8",
+      "sha256": "edacc3ac4d80612000f7e379c0be597764834fddebf399d03cde5e82bea783c3",
+      "byte_length": 271,
       "record_count": 10,
       "column_count": 4
     },
     "right": {
       "name": "payroll",
+      "file_name": "payroll.csv",
+      "encoding": "utf-8",
+      "sha256": "f3a257aa0d0e63017b974388f805a3df595b5839d6f0b388fc0b893a056f1a17",
+      "byte_length": 287,
       "record_count": 10,
       "column_count": 4
     }
+  },
+  "contract": {
+    "schema_version": "1.0",
+    "name": "core_hr_vs_payroll",
+    "left": {
+      "name": "core_hr"
+    },
+    "right": {
+      "name": "payroll"
+    },
+    "identity": {
+      "left": "person_id",
+      "right": "employee_number",
+      "normalize": []
+    },
+    "fields": [
+      {
+        "name": "first_name",
+        "left": "first_name",
+        "right": "given_name",
+        "mode": "Custom",
+        "normalize": [
+          "trim",
+          "casefold"
+        ],
+        "value_mapping": null
+      },
+      {
+        "name": "last_name",
+        "left": "last_name",
+        "right": "surname",
+        "mode": "Custom",
+        "normalize": [
+          "trim",
+          "casefold"
+        ],
+        "value_mapping": null
+      },
+      {
+        "name": "company",
+        "left": "company",
+        "right": "company_code",
+        "mode": "Value mapping",
+        "normalize": [],
+        "value_mapping": "company"
+      }
+    ],
+    "value_mappings": {
+      "company": {
+        "DE_GERMANY": {
+          "left": [
+            "DE01"
+          ],
+          "right": [
+            "1000"
+          ]
+        },
+        "CH_SWITZERLAND": {
+          "left": [
+            "CH01"
+          ],
+          "right": [
+            "2000"
+          ]
+        }
+      }
+    }
+  },
+  "detail_scope": {
+    "kind": "discrepancies_and_identity_issues",
+    "description": "details.identities lists identity issues only (every status except MATCHED); details.field_comparisons lists discrepancies only (MISMATCH, LEFT_NULL, RIGHT_NULL, UNMAPPED_LEFT, UNMAPPED_RIGHT). Matches are counted in identity_summary and field_comparison_summary. full.csv contains every identity and every comparison."
   },
   "identity_summary": {
     "MATCHED": 9,
@@ -40,198 +128,28 @@
   "details": {
     "identities": [
       {
-        "identity": "P001",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "P002",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "P003",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "P004",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "P005",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "P006",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "P007",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "P008",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "P009",
-        "status": "MATCHED"
-      },
-      {
         "identity": "P010",
-        "status": "MISSING_RIGHT"
+        "status": "MISSING_RIGHT",
+        "left_rows": [
+          11
+        ],
+        "right_rows": []
       },
       {
         "identity": "P011",
-        "status": "MISSING_LEFT"
+        "status": "MISSING_LEFT",
+        "left_rows": [],
+        "right_rows": [
+          11
+        ]
       }
     ],
     "field_comparisons": [
       {
-        "identity": "P001",
-        "field_name": "first_name",
-        "left_raw_value": "Zephyra",
-        "right_raw_value": "Zephyra",
-        "left_normalized_value": "zephyra",
-        "right_normalized_value": "zephyra",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P001",
-        "field_name": "last_name",
-        "left_raw_value": "Quill",
-        "right_raw_value": "Quill",
-        "left_normalized_value": "quill",
-        "right_normalized_value": "quill",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P001",
-        "field_name": "company",
-        "left_raw_value": "DE01",
-        "right_raw_value": "1000",
-        "left_normalized_value": "DE01",
-        "right_normalized_value": "1000",
-        "left_canonical_value": "DE_GERMANY",
-        "right_canonical_value": "DE_GERMANY",
-        "status": "MATCH_MAPPED",
-        "mapping_name": "company"
-      },
-      {
-        "identity": "P002",
-        "field_name": "first_name",
-        "left_raw_value": "Orbin",
-        "right_raw_value": "Orbin",
-        "left_normalized_value": "orbin",
-        "right_normalized_value": "orbin",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P002",
-        "field_name": "last_name",
-        "left_raw_value": "Fable",
-        "right_raw_value": "Fable",
-        "left_normalized_value": "fable",
-        "right_normalized_value": "fable",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P002",
-        "field_name": "company",
-        "left_raw_value": "CH01",
-        "right_raw_value": "2000",
-        "left_normalized_value": "CH01",
-        "right_normalized_value": "2000",
-        "left_canonical_value": "CH_SWITZERLAND",
-        "right_canonical_value": "CH_SWITZERLAND",
-        "status": "MATCH_MAPPED",
-        "mapping_name": "company"
-      },
-      {
-        "identity": "P003",
-        "field_name": "first_name",
-        "left_raw_value": "Nymera",
-        "right_raw_value": "  NYMERA  ",
-        "left_normalized_value": "nymera",
-        "right_normalized_value": "nymera",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_NORMALIZED",
-        "mapping_name": null
-      },
-      {
-        "identity": "P003",
-        "field_name": "last_name",
-        "left_raw_value": "Voss",
-        "right_raw_value": "Voss",
-        "left_normalized_value": "voss",
-        "right_normalized_value": "voss",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P003",
-        "field_name": "company",
-        "left_raw_value": "DE01",
-        "right_raw_value": "1000",
-        "left_normalized_value": "DE01",
-        "right_normalized_value": "1000",
-        "left_canonical_value": "DE_GERMANY",
-        "right_canonical_value": "DE_GERMANY",
-        "status": "MATCH_MAPPED",
-        "mapping_name": "company"
-      },
-      {
-        "identity": "P004",
-        "field_name": "first_name",
-        "left_raw_value": "Tovin",
-        "right_raw_value": "Tovin",
-        "left_normalized_value": "tovin",
-        "right_normalized_value": "tovin",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P004",
-        "field_name": "last_name",
-        "left_raw_value": "Ember",
-        "right_raw_value": "  EMBER  ",
-        "left_normalized_value": "ember",
-        "right_normalized_value": "ember",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_NORMALIZED",
-        "mapping_name": null
-      },
-      {
-        "identity": "P004",
-        "field_name": "company",
-        "left_raw_value": "CH01",
-        "right_raw_value": "2000",
-        "left_normalized_value": "CH01",
-        "right_normalized_value": "2000",
-        "left_canonical_value": "CH_SWITZERLAND",
-        "right_canonical_value": "CH_SWITZERLAND",
-        "status": "MATCH_MAPPED",
-        "mapping_name": "company"
-      },
-      {
         "identity": "P005",
         "field_name": "first_name",
+        "left_row": 6,
+        "right_row": 6,
         "left_raw_value": "Caldrin",
         "right_raw_value": "Caldris",
         "left_normalized_value": "caldrin",
@@ -242,92 +160,10 @@
         "mapping_name": null
       },
       {
-        "identity": "P005",
-        "field_name": "last_name",
-        "left_raw_value": "Morrow",
-        "right_raw_value": "Morrow",
-        "left_normalized_value": "morrow",
-        "right_normalized_value": "morrow",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P005",
-        "field_name": "company",
-        "left_raw_value": "DE01",
-        "right_raw_value": "1000",
-        "left_normalized_value": "DE01",
-        "right_normalized_value": "1000",
-        "left_canonical_value": "DE_GERMANY",
-        "right_canonical_value": "DE_GERMANY",
-        "status": "MATCH_MAPPED",
-        "mapping_name": "company"
-      },
-      {
-        "identity": "P006",
-        "field_name": "first_name",
-        "left_raw_value": "Elowen",
-        "right_raw_value": "Elowen",
-        "left_normalized_value": "elowen",
-        "right_normalized_value": "elowen",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P006",
-        "field_name": "last_name",
-        "left_raw_value": "Prysm",
-        "right_raw_value": "Prysm",
-        "left_normalized_value": "prysm",
-        "right_normalized_value": "prysm",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P006",
-        "field_name": "company",
-        "left_raw_value": "CH01",
-        "right_raw_value": "2000",
-        "left_normalized_value": "CH01",
-        "right_normalized_value": "2000",
-        "left_canonical_value": "CH_SWITZERLAND",
-        "right_canonical_value": "CH_SWITZERLAND",
-        "status": "MATCH_MAPPED",
-        "mapping_name": "company"
-      },
-      {
-        "identity": "P007",
-        "field_name": "first_name",
-        "left_raw_value": "Vexa",
-        "right_raw_value": "Vexa",
-        "left_normalized_value": "vexa",
-        "right_normalized_value": "vexa",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P007",
-        "field_name": "last_name",
-        "left_raw_value": "Lumen",
-        "right_raw_value": "Lumen",
-        "left_normalized_value": "lumen",
-        "right_normalized_value": "lumen",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
         "identity": "P007",
         "field_name": "company",
+        "left_row": 8,
+        "right_row": 8,
         "left_raw_value": "XX99",
         "right_raw_value": "1000",
         "left_normalized_value": "XX99",
@@ -335,78 +171,6 @@
         "left_canonical_value": null,
         "right_canonical_value": "DE_GERMANY",
         "status": "UNMAPPED_LEFT",
-        "mapping_name": "company"
-      },
-      {
-        "identity": "P008",
-        "field_name": "first_name",
-        "left_raw_value": "Bramble",
-        "right_raw_value": "Bramble",
-        "left_normalized_value": "bramble",
-        "right_normalized_value": "bramble",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P008",
-        "field_name": "last_name",
-        "left_raw_value": "Kestrel",
-        "right_raw_value": "Kestrel",
-        "left_normalized_value": "kestrel",
-        "right_normalized_value": "kestrel",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P008",
-        "field_name": "company",
-        "left_raw_value": "DE01",
-        "right_raw_value": "1000",
-        "left_normalized_value": "DE01",
-        "right_normalized_value": "1000",
-        "left_canonical_value": "DE_GERMANY",
-        "right_canonical_value": "DE_GERMANY",
-        "status": "MATCH_MAPPED",
-        "mapping_name": "company"
-      },
-      {
-        "identity": "P009",
-        "field_name": "first_name",
-        "left_raw_value": "Ilyra",
-        "right_raw_value": "Ilyra",
-        "left_normalized_value": "ilyra",
-        "right_normalized_value": "ilyra",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P009",
-        "field_name": "last_name",
-        "left_raw_value": "Wisp",
-        "right_raw_value": "Wisp",
-        "left_normalized_value": "wisp",
-        "right_normalized_value": "wisp",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "P009",
-        "field_name": "company",
-        "left_raw_value": "CH01",
-        "right_raw_value": "2000",
-        "left_normalized_value": "CH01",
-        "right_normalized_value": "2000",
-        "left_canonical_value": "CH_SWITZERLAND",
-        "right_canonical_value": "CH_SWITZERLAND",
-        "status": "MATCH_MAPPED",
         "mapping_name": "company"
       }
     ]

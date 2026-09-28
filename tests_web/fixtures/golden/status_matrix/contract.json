@@ -1,24 +1,23 @@
 {
+  "schema_version": "1.0",
   "name": "status_matrix",
   "left": {
-    "name": "left",
-    "type": null,
-    "path": null
+    "name": "left"
   },
   "right": {
-    "name": "right",
-    "type": null,
-    "path": null
+    "name": "right"
   },
   "identity": {
     "left": "id",
-    "right": "id"
+    "right": "id",
+    "normalize": []
   },
   "fields": [
     {
       "name": "text",
       "left": "text",
       "right": "text",
+      "mode": "Custom",
       "normalize": [
         "trim",
         "casefold"
@@ -29,6 +28,7 @@
       "name": "mapped",
       "left": "mapped",
       "right": "mapped",
+      "mode": "Value mapping",
       "normalize": [],
       "value_mapping": "codes"
     }

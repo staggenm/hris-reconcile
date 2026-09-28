@@ -53,13 +53,15 @@ describe("MISSING_IDENTITY", () => {
   it("exports missing identities in CSV and a schema-valid JSON report", () => {
     const result = new ReconciliationEngine().reconcile({ contract, leftDataset: left, rightDataset: right });
     const csv = generateReconciliationCsv(result, { mismatchesOnly: true });
-    expect(csv).toContain("identity,,,,,,,,,,,MISSING_IDENTITY_LEFT\n");
+    // Datasets built in code number their records from line 2 (header = line 1).
+    expect(csv).toContain("identity,,,,,,,,,,,MISSING_IDENTITY_LEFT,2,\n");
     // excelSafe (default) neutralizes the leading TAB.
-    expect(csv).toContain("identity,'\t,,,,,,,,,,MISSING_IDENTITY_RIGHT\n");
+    expect(csv).toContain("identity,'\t,,,,,,,,,,MISSING_IDENTITY_RIGHT,,3\n");
     const report = JSON.parse(generateReconciliationJson(contract, result));
     expect(report.identity_summary).toMatchObject({ MISSING_IDENTITY_LEFT: 3, MISSING_IDENTITY_RIGHT: 1 });
-    expect(report.details.identities[1]).toEqual({ identity: null, status: "MISSING_IDENTITY_LEFT" });
-    const schema = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../schemas/report.schema.json"), "utf8"));
+    // Report 2.0 details list identity issues only, so the matched "001" is not listed.
+    expect(report.details.identities[0]).toEqual({ identity: null, status: "MISSING_IDENTITY_LEFT", left_rows: [2], right_rows: [] });
+    const schema = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../schemas/report-2.0.schema.json"), "utf8"));
     expect(validateJsonSchema(schema, report)).toEqual([]);
   });
 });

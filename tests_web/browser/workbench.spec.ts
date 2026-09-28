@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -66,7 +67,7 @@ test("standalone workflow, styled view, exports, and zero egress", async ({ page
   await expect(page.locator("#step-results")).toBeHidden();
   expect(await page.locator("#left-dataset").textContent()).toBe("");
   expect(await page.locator("body").innerText()).not.toMatch(/Ada|Grace|001|002/);
-  expect(await page.locator("input:not([type=checkbox])").evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value))).toEqual(["", "", ""]);
+  expect(await page.locator("input:not([type=checkbox])").evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value))).toEqual(["", "", "", ""]);
   expect(await page.locator("#identity-normalizers input:checked").count()).toBe(0);
   expect(await page.evaluate(() => (window as any).__egressCalls)).toEqual([]);
   expect(egress).toEqual([]);
@@ -401,4 +402,97 @@ test("a worker crash resets the session with a clear message and a fresh worker 
   await expect(page.locator("#step-results")).toBeVisible();
   await expect(page.locator("#error")).toBeHidden();
   expect(await page.evaluate(() => (window as any).__workers.length)).toBe(2);
+});
+
+async function tableRows(page: import("@playwright/test").Page, selector: string): Promise<string[][]> {
+  return page.locator(`${selector} table tr`).evaluateAll((rows) =>
+    rows.map((row) => Array.from(row.querySelectorAll("th, td"), (cell) => (cell.textContent ?? "").trim())));
+}
+
+test("source rows appear in the UI and the JSON report is format 2.0 with source hashes", async ({ page }) => {
+  const leftText = 'person_id,note\n001,"two\nlines"\n002,x\n,blank\n';
+  const rightText = "employee_number,note\n001,changed\n002,x\n003,new\n";
+  await page.goto(artifact);
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftText) });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightText) });
+  await page.locator("#left-identity").selectOption("person_id");
+  await page.locator("#right-identity").selectOption("employee_number");
+  await page.locator("#confirm-identity").click();
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+
+  await expect(page.locator("#identity-issues")).toContainText("MISSING_IDENTITY_LEFT");
+  const issues = await tableRows(page, "#identity-issues");
+  expect(issues[0]).toEqual(["Employee identity", "Status", "Dataset A rows", "Dataset B rows"]);
+  expect(issues).toContainEqual(["003", "MISSING_LEFT", "", "4"]);
+  expect(issues).toContainEqual(["<missing>", "MISSING_IDENTITY_LEFT", "5", ""]);
+
+  await expect(page.locator("#detail-summary")).toContainText("Employee details");
+  const details = await tableRows(page, "#detail-summary");
+  expect(details[0]).toEqual(["Employee identity", "Field", "Dataset A row", "Dataset B row", "Dataset A value", "Dataset B value", "Comparison status"]);
+  expect(details[1]).toEqual(["001", "note", "2", "2", "two\nlines", "changed", "mismatch"]);
+
+  const report = JSON.parse(await downloadText(page, "JSON report"));
+  expect(report.report_format_version).toBe("2.0");
+  expect(report.sources.left).toMatchObject({
+    file_name: "left.csv", encoding: "utf-8", byte_length: Buffer.byteLength(leftText),
+    sha256: createHash("sha256").update(leftText).digest("hex"),
+  });
+  expect(report.sources.right.sha256).toBe(createHash("sha256").update(rightText).digest("hex"));
+  expect(Date.now() - Date.parse(report.run_metadata.generated_at)).toBeLessThan(60_000);
+  expect(report.run_metadata.generated_at).toMatch(/Z$/);
+  expect(report.contract.schema_version).toBe("1.0");
+  expect(report.details.field_comparisons).toEqual([expect.objectContaining({ identity: "001", left_row: 2, right_row: 2, status: "MISMATCH" })]);
+});
+
+test("a saved contract re-imports into a fresh session and reproduces the same full.csv", async ({ page }) => {
+  const rightNumbers = "employee_number,given_name,company_code\n1,Ada,1000\n2,grace,1000\n";
+  const upload = async (right: string) => {
+    await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv) });
+    await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(right) });
+    await expect(page.locator("#step-identity")).toBeVisible();
+  };
+  await page.goto(artifact);
+  await upload(rightNumbers);
+  await page.locator("#left-identity").selectOption("person_id");
+  await page.locator("#right-identity").selectOption("employee_number");
+  await page.getByLabel("Strip leading zeros").check();
+  await page.locator("#confirm-identity").click();
+  await page.locator("#field-rows select").nth(2).selectOption("Normalized text");
+  await page.locator("#field-rows select").nth(5).selectOption("Value mapping");
+  await page.locator("#confirm-fields").click();
+  await expect(page.locator("#mapping-editors tbody tr")).toHaveCount(1);
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toBeVisible();
+  const firstRun = await downloadText(page, "Full results CSV");
+  expect(firstRun).toContain("MATCH_MAPPED");
+
+  const directory = mkdtempSync(resolve(tmpdir(), "hris-contract-"));
+  try {
+    const contractPath = resolve(directory, "contract.json");
+    writeFileSync(contractPath, await downloadText(page, "Save contract (JSON)"));
+    expect(JSON.parse(await readFile(contractPath, "utf8")).schema_version).toBe("1.0");
+
+    await page.locator("#clear-session").click();
+    await upload(rightNumbers);
+    await page.locator("#contract-file").setInputFiles(contractPath);
+    await expect(page.locator("#step-run")).toBeVisible();
+    await expect(page.getByLabel("Strip leading zeros")).toBeChecked();
+    await expect(page.locator("#mapping-editors tbody tr")).toHaveCount(1);
+    await page.locator("#run-reconciliation").click();
+    await expect(page.locator("#step-results")).toBeVisible();
+    expect(await downloadText(page, "Full results CSV")).toBe(firstRun);
+
+    await page.locator("#clear-session").click();
+    await upload("employee_number,given_name\n1,Ada\n");
+    await page.locator("#contract-file").setInputFiles(contractPath);
+    await expect(page.locator("#error")).toHaveAttribute("data-code", "COLUMNS_MISSING");
+    await expect(page.locator("#error")).toContainText("Dataset B is missing 'company_code'");
+    await expect(page.locator("#step-fields")).toBeHidden();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

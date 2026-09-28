@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { BLOB_FOLD_CHARS, CHUNK_CHARS, csvChunks, exportBlob, jsonChunks } from "../src/web/core/export";
 import { ReconciliationEngine } from "../src/web/core/reconciliation";
 import { Dataset, ReconciliationContract } from "../src/web/core/types";
+import { TEST_METADATA } from "./support/exports";
 
 const EMPLOYEES = 20_000;
 const dataset = (name: string): Dataset => ({
   name, columns: ["id", "a", "b", "c"],
-  records: Array.from({ length: EMPLOYEES }, (_, i) => ({ id: `E${i}`, a: `alpha ${i}`, b: i % 20 === 0 ? `${name}${i}` : "same", c: null })),
+  // b and c differ on every row, so the JSON report (discrepancies only) is large enough to chunk and fold.
+  records: Array.from({ length: EMPLOYEES }, (_, i) => ({ id: `E${i}`, a: `alpha ${i}`, b: `${name}${i}`, c: `${name}-c${i}` })),
 });
 const contract: ReconciliationContract = {
   name: "stream", left: { name: "l" }, right: { name: "r" }, identity: { left: "id", right: "id" },
@@ -29,10 +31,10 @@ describe("streaming exports", () => {
   });
 
   it("emits JSON as bounded chunks that equal JSON.stringify(report, null, 2)", () => {
-    const chunks = [...jsonChunks(contract, result)];
+    const chunks = [...jsonChunks(contract, result, TEST_METADATA)];
     expectBoundedChunks(chunks);
     const parsed = JSON.parse(chunks.join(""));
-    expect(parsed.details.field_comparisons).toHaveLength(EMPLOYEES * 3);
+    expect(parsed.details.field_comparisons).toHaveLength(EMPLOYEES * 2);
     expect(chunks.join("")).toBe(`${JSON.stringify(parsed, null, 2)}\n`);
   });
 
@@ -40,15 +42,15 @@ describe("streaming exports", () => {
     const empty = new ReconciliationEngine().reconcile({
       contract, leftDataset: { ...dataset("l"), records: [] }, rightDataset: { ...dataset("r"), records: [] },
     });
-    const text = [...jsonChunks(contract, empty)].join("");
+    const text = [...jsonChunks(contract, empty, TEST_METADATA)].join("");
     expect(text).toContain('"identities": [],\n    "field_comparisons": []\n');
     expect(text).toBe(`${JSON.stringify(JSON.parse(text), null, 2)}\n`);
   });
 
   it("folds chunks into the Blob incrementally for exports larger than the fold size", async () => {
-    const full = [...jsonChunks(contract, result)].join("");
+    const full = [...jsonChunks(contract, result, TEST_METADATA)].join("");
     expect(full.length).toBeGreaterThan(BLOB_FOLD_CHARS);
-    const blob = exportBlob(jsonChunks(contract, result), "application/json;charset=utf-8");
+    const blob = exportBlob(jsonChunks(contract, result, TEST_METADATA), "application/json;charset=utf-8");
     expect(await blob.text()).toBe(full);
   });
 

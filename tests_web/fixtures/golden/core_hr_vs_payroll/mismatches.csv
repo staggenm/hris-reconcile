@@ -1,5 +1,5 @@
-record_type,identity,field_name,left_raw_value,right_raw_value,left_normalized_value,right_normalized_value,left_canonical_value,right_canonical_value,mapping_name,comparison_status,identity_status
-identity,P010,,,,,,,,,,MISSING_RIGHT
-identity,P011,,,,,,,,,,MISSING_LEFT
-field_comparison,P005,first_name,Caldrin,Caldris,caldrin,caldris,,,,MISMATCH,
-field_comparison,P007,company,XX99,1000,XX99,1000,,DE_GERMANY,company,UNMAPPED_LEFT,
+record_type,identity,field_name,left_raw_value,right_raw_value,left_normalized_value,right_normalized_value,left_canonical_value,right_canonical_value,mapping_name,comparison_status,identity_status,left_source_rows,right_source_rows
+identity,P010,,,,,,,,,,MISSING_RIGHT,11,
+identity,P011,,,,,,,,,,MISSING_LEFT,,11
+field_comparison,P005,first_name,Caldrin,Caldris,caldrin,caldris,,,,MISMATCH,,6,6
+field_comparison,P007,company,XX99,1000,XX99,1000,,DE_GERMANY,company,UNMAPPED_LEFT,,8,8

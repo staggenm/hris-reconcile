@@ -1,0 +1,566 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hris-reconcile:report:2.0",
+  "title": "HRIS Reconciliation JSON report",
+  "description": "Report format 2.0, produced by the browser workbench (src/web/core/export.ts). Details list identity issues and discrepancies only; full.csv holds every comparison.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_format_version",
+    "run_metadata",
+    "sources",
+    "contract",
+    "detail_scope",
+    "identity_summary",
+    "field_comparison_summary",
+    "details"
+  ],
+  "properties": {
+    "report_format_version": {
+      "const": "2.0"
+    },
+    "run_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "app_version",
+        "generated_at",
+        "processing_mode",
+        "excel_safe",
+        "limits"
+      ],
+      "properties": {
+        "app_version": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "processing_mode": {
+          "const": "browser"
+        },
+        "excel_safe": {
+          "type": "boolean",
+          "description": "Whether CSV exports neutralize spreadsheet formulas (the setting when this report was generated)."
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_file_bytes",
+            "max_rows",
+            "max_columns",
+            "max_cells",
+            "max_comparisons",
+            "max_discrepancies"
+          ],
+          "properties": {
+            "max_file_bytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_columns": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_cells": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_comparisons": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_discrepancies": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "left",
+        "right"
+      ],
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/source"
+        },
+        "right": {
+          "$ref": "#/$defs/source"
+        }
+      }
+    },
+    "contract": {
+      "$ref": "#/$defs/contract"
+    },
+    "detail_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "description"
+      ],
+      "properties": {
+        "kind": {
+          "const": "discrepancies_and_identity_issues"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "identity_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "MATCHED",
+        "MISSING_LEFT",
+        "MISSING_RIGHT",
+        "DUPLICATE_LEFT",
+        "DUPLICATE_RIGHT",
+        "MISSING_IDENTITY_LEFT",
+        "MISSING_IDENTITY_RIGHT"
+      ],
+      "properties": {
+        "MATCHED": {
+          "$ref": "#/$defs/count"
+        },
+        "MISSING_LEFT": {
+          "$ref": "#/$defs/count"
+        },
+        "MISSING_RIGHT": {
+          "$ref": "#/$defs/count"
+        },
+        "DUPLICATE_LEFT": {
+          "$ref": "#/$defs/count"
+        },
+        "DUPLICATE_RIGHT": {
+          "$ref": "#/$defs/count"
+        },
+        "MISSING_IDENTITY_LEFT": {
+          "$ref": "#/$defs/count"
+        },
+        "MISSING_IDENTITY_RIGHT": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "field_comparison_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "MATCH_EXACT",
+        "MATCH_NORMALIZED",
+        "MATCH_MAPPED",
+        "BOTH_NULL",
+        "LEFT_NULL",
+        "RIGHT_NULL",
+        "UNMAPPED_LEFT",
+        "UNMAPPED_RIGHT",
+        "MISMATCH"
+      ],
+      "properties": {
+        "MATCH_EXACT": {
+          "$ref": "#/$defs/count"
+        },
+        "MATCH_NORMALIZED": {
+          "$ref": "#/$defs/count"
+        },
+        "MATCH_MAPPED": {
+          "$ref": "#/$defs/count"
+        },
+        "BOTH_NULL": {
+          "$ref": "#/$defs/count"
+        },
+        "LEFT_NULL": {
+          "$ref": "#/$defs/count"
+        },
+        "RIGHT_NULL": {
+          "$ref": "#/$defs/count"
+        },
+        "UNMAPPED_LEFT": {
+          "$ref": "#/$defs/count"
+        },
+        "UNMAPPED_RIGHT": {
+          "$ref": "#/$defs/count"
+        },
+        "MISMATCH": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identities",
+        "field_comparisons"
+      ],
+      "properties": {
+        "identities": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/keyed_identity_issue"
+              },
+              {
+                "$ref": "#/$defs/missing_identity"
+              }
+            ]
+          }
+        },
+        "field_comparisons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/discrepancy"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nullable_string": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "file_name",
+        "encoding",
+        "sha256",
+        "byte_length",
+        "record_count",
+        "column_count"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "file_name": {
+          "type": "string"
+        },
+        "encoding": {
+          "enum": [
+            "utf-8",
+            "windows-1252"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "byte_length": {
+          "$ref": "#/$defs/count"
+        },
+        "record_count": {
+          "$ref": "#/$defs/count"
+        },
+        "column_count": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "name",
+        "left",
+        "right",
+        "identity",
+        "fields",
+        "value_mappings"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "name": {
+          "type": "string"
+        },
+        "left": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "right": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          }
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "left",
+            "right",
+            "normalize"
+          ],
+          "properties": {
+            "left": {
+              "type": "string"
+            },
+            "right": {
+              "type": "string"
+            },
+            "normalize": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "trim",
+                  "strip_leading_zeros",
+                  "casefold"
+                ]
+              }
+            }
+          }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "left",
+              "right",
+              "mode",
+              "normalize",
+              "value_mapping"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "left": {
+                "type": "string"
+              },
+              "right": {
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "Exact",
+                  "Normalized text",
+                  "Value mapping",
+                  "Custom"
+                ]
+              },
+              "normalize": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "nfc",
+                    "trim",
+                    "uppercase",
+                    "lowercase",
+                    "casefold",
+                    "collapse_whitespace",
+                    "strip_leading_zeros"
+                  ]
+                }
+              },
+              "value_mapping": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "value_mappings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "left",
+                "right"
+              ],
+              "properties": {
+                "left": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "right": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyed_identity_issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "status",
+        "left_rows",
+        "right_rows"
+      ],
+      "properties": {
+        "identity": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "MISSING_LEFT",
+            "MISSING_RIGHT",
+            "DUPLICATE_LEFT",
+            "DUPLICATE_RIGHT"
+          ]
+        },
+        "left_rows": {
+          "$ref": "#/$defs/rows"
+        },
+        "right_rows": {
+          "$ref": "#/$defs/rows"
+        }
+      }
+    },
+    "missing_identity": {
+      "description": "A record whose identity is null or all whitespace; identity holds the raw value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "status",
+        "left_rows",
+        "right_rows"
+      ],
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "status": {
+          "enum": [
+            "MISSING_IDENTITY_LEFT",
+            "MISSING_IDENTITY_RIGHT"
+          ]
+        },
+        "left_rows": {
+          "$ref": "#/$defs/rows"
+        },
+        "right_rows": {
+          "$ref": "#/$defs/rows"
+        }
+      }
+    },
+    "discrepancy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "field_name",
+        "left_row",
+        "right_row",
+        "left_raw_value",
+        "right_raw_value",
+        "left_normalized_value",
+        "right_normalized_value",
+        "left_canonical_value",
+        "right_canonical_value",
+        "status",
+        "mapping_name"
+      ],
+      "properties": {
+        "identity": {
+          "type": "string"
+        },
+        "field_name": {
+          "type": "string"
+        },
+        "left_row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "right_row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "left_raw_value": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "right_raw_value": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "left_normalized_value": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "right_normalized_value": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "left_canonical_value": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "right_canonical_value": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "status": {
+          "enum": [
+            "MISMATCH",
+            "LEFT_NULL",
+            "RIGHT_NULL",
+            "UNMAPPED_LEFT",
+            "UNMAPPED_RIGHT"
+          ]
+        },
+        "mapping_name": {
+          "$ref": "#/$defs/nullable_string"
+        }
+      }
+    }
+  }
+}

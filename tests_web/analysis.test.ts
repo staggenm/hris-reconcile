@@ -264,7 +264,7 @@ describe("Contract Builder & Results Analysis & Exports", () => {
 
     const json = generateReconciliationJson(contract, result);
     const parsed = JSON.parse(json);
-    expect(parsed.contract_name).toBe("test_run");
+    expect(parsed.contract.name).toBe("test_run");
     expect(parsed.identity_summary.MATCHED).toBe(2);
     expect(parsed.field_comparison_summary.MISMATCH).toBe(1);
   });

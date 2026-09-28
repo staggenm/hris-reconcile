@@ -34,6 +34,8 @@ export function compareFieldWithResolver(
     rightRecord: RecordRow;
     field: FieldConfig;
     valueMappings: Record<string, MappingConfig>;
+    leftLine?: number;
+    rightLine?: number;
   },
   resolver?: MappingResolver,
 ): FieldComparisonResult {
@@ -91,5 +93,7 @@ export function compareFieldWithResolver(
     rightCanonicalValue: rightCanonical,
     status,
     mappingName: field.valueMapping || null,
+    leftLine: options.leftLine ?? 0,
+    rightLine: options.rightLine ?? 0,
   };
 }

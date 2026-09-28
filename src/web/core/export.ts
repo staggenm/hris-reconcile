@@ -4,7 +4,11 @@ import {
   ReconciliationContract,
   ReconciliationResult,
 } from "./types";
-import { FIELD_STATUSES } from "./status";
+import type { CsvEncoding } from "../analysis/csv";
+import { serializeContract } from "./contract_document";
+import { DEFAULT_LIMITS, Limits } from "./limits";
+import { FIELD_STATUSES, IDENTITY_PUBLIC } from "./status";
+import { APP_VERSION } from "./version";
 
 const CSV_COLUMNS = [
   "record_type",
@@ -19,17 +23,10 @@ const CSV_COLUMNS = [
   "mapping_name",
   "comparison_status",
   "identity_status",
+  "left_source_rows",
+  "right_source_rows",
 ] as const;
 
-const IDENTITY_PUBLIC: Record<ReconciliationResult["identityResults"][number]["status"], string> = {
-  matched: "MATCHED",
-  missing_left: "MISSING_LEFT",
-  missing_right: "MISSING_RIGHT",
-  duplicate_left: "DUPLICATE_LEFT",
-  duplicate_right: "DUPLICATE_RIGHT",
-  missing_identity_left: "MISSING_IDENTITY_LEFT",
-  missing_identity_right: "MISSING_IDENTITY_RIGHT",
-};
 const FIELD_PUBLIC: Record<FieldComparisonStatus, string> = {
   match_exact: "MATCH_EXACT",
   match_normalized: "MATCH_NORMALIZED",
@@ -133,6 +130,8 @@ function* csvLines(
       "", // mapping_name
       "", // comparison_status
       cell(IDENTITY_PUBLIC[identity.status]),
+      identity.leftLines.join(";"),
+      identity.rightLines.join(";"),
     ];
     yield `${row.join(",")}\n`;
   }
@@ -151,6 +150,8 @@ function* csvLines(
       cell(field.mappingName),
       cell(FIELD_PUBLIC[field.status]),
       "", // identity_status
+      String(field.leftLine),
+      String(field.rightLine),
     ];
     yield `${row.join(",")}\n`;
   }
@@ -163,37 +164,46 @@ export function csvChunks(
   return batched(csvLines(result, options.mismatchesOnly ?? false, options.excelSafe ?? true));
 }
 
-export interface JsonReport {
-  run_metadata: {
-    format_version: string;
-    engine_version: string;
-    processing_mode: string;
-  };
-  contract_name: string;
-  datasets: {
-    left: { name: string; record_count: number; column_count: number };
-    right: { name: string; record_count: number; column_count: number };
-  };
-  identity_summary: Record<string, number>;
-  field_comparison_summary: Record<string, number>;
-  details: {
-    identities: Array<{ identity: string | null; status: string }>;
-    field_comparisons: Iterable<JsonFieldComparison>;
+export const REPORT_FORMAT_VERSION = "2.0";
+
+export interface SourceInfo {
+  fileName: string;
+  encoding: CsvEncoding;
+  // SHA-256 of the raw file bytes, computed before decoding.
+  sha256: string;
+  byteLength: number;
+}
+
+export interface ReportMetadata {
+  appVersion: string;
+  generatedAt: string;
+  excelSafe: boolean;
+  limits: Limits;
+  sources: { left: SourceInfo; right: SourceInfo };
+}
+
+export function buildReportMetadata(options: {
+  sources: { left: SourceInfo; right: SourceInfo };
+  excelSafe: boolean;
+  limits?: Limits;
+  now?: Date;
+}): ReportMetadata {
+  return {
+    appVersion: APP_VERSION,
+    generatedAt: (options.now ?? new Date()).toISOString(),
+    excelSafe: options.excelSafe,
+    limits: options.limits ?? DEFAULT_LIMITS,
+    sources: options.sources,
   };
 }
 
-interface JsonFieldComparison {
-  identity: string;
-  field_name: string;
-  left_raw_value: string | null;
-  right_raw_value: string | null;
-  left_normalized_value: string | null;
-  right_normalized_value: string | null;
-  left_canonical_value: string | null;
-  right_canonical_value: string | null;
-  status: string;
-  mapping_name: string | null;
-}
+export const DETAIL_SCOPE = {
+  kind: "discrepancies_and_identity_issues",
+  description:
+    "details.identities lists identity issues only (every status except MATCHED); details.field_comparisons lists discrepancies only " +
+    "(MISMATCH, LEFT_NULL, RIGHT_NULL, UNMAPPED_LEFT, UNMAPPED_RIGHT). Matches are counted in identity_summary and " +
+    "field_comparison_summary. full.csv contains every identity and every comparison.",
+} as const;
 
 // A JSON array whose items are produced on demand while writing.
 class LazyArray {
@@ -234,10 +244,12 @@ function* prettyJson(value: unknown, indent: string): Generator<string> {
   yield JSON.stringify(value);
 }
 
-function jsonComparison(f: FieldComparisonResult): JsonFieldComparison {
+function jsonComparison(f: FieldComparisonResult) {
   return {
     identity: f.identity,
     field_name: f.fieldName,
+    left_row: f.leftLine,
+    right_row: f.rightLine,
     left_raw_value: f.leftRawValue,
     right_raw_value: f.rightRawValue,
     left_normalized_value: f.leftNormalizedValue,
@@ -252,6 +264,7 @@ function jsonComparison(f: FieldComparisonResult): JsonFieldComparison {
 export function jsonChunks(
   contract: ReconciliationContract,
   result: ReconciliationResult,
+  metadata: ReportMetadata,
 ): Generator<string> {
   const identitySummary: Record<string, number> = {
     MATCHED: 0,
@@ -281,33 +294,50 @@ export function jsonChunks(
     for (const status of FIELD_STATUSES) fieldComparisonSummary[FIELD_PUBLIC[status]] += counts[status];
   }
 
+  const source = (side: "left" | "right") => {
+    const stats = side === "left" ? result.leftDataset : result.rightDataset;
+    const info = metadata.sources[side];
+    return {
+      name: stats.name,
+      file_name: info.fileName,
+      encoding: info.encoding,
+      sha256: info.sha256,
+      byte_length: info.byteLength,
+      record_count: stats.recordCount,
+      column_count: stats.columnCount,
+    };
+  };
+
   const report = {
+    report_format_version: REPORT_FORMAT_VERSION,
     run_metadata: {
-      format_version: "1.0",
-      engine_version: "0.3.0",
+      app_version: metadata.appVersion,
+      generated_at: metadata.generatedAt,
       processing_mode: "browser",
-    },
-    contract_name: contract.name,
-    datasets: {
-      left: {
-        name: result.leftDataset.name,
-        record_count: result.leftDataset.recordCount,
-        column_count: result.leftDataset.columnCount,
-      },
-      right: {
-        name: result.rightDataset.name,
-        record_count: result.rightDataset.recordCount,
-        column_count: result.rightDataset.columnCount,
+      excel_safe: metadata.excelSafe,
+      limits: {
+        max_file_bytes: metadata.limits.maxFileBytes,
+        max_rows: metadata.limits.maxRows,
+        max_columns: metadata.limits.maxColumns,
+        max_cells: metadata.limits.maxCells,
+        max_comparisons: metadata.limits.maxComparisons,
+        max_discrepancies: metadata.limits.maxDiscrepancies,
       },
     },
+    sources: { left: source("left"), right: source("right") },
+    contract: serializeContract(contract),
+    detail_scope: DETAIL_SCOPE,
     identity_summary: identitySummary,
     field_comparison_summary: fieldComparisonSummary,
     details: {
       identities: new LazyArray(function* () {
-        for (const id of result.identityResults) yield { identity: id.identity, status: IDENTITY_PUBLIC[id.status] };
+        for (const id of result.identityResults) {
+          if (id.status === "matched") continue;
+          yield { identity: id.identity, status: IDENTITY_PUBLIC[id.status], left_rows: id.leftLines, right_rows: id.rightLines };
+        }
       }),
       field_comparisons: new LazyArray(function* () {
-        for (const f of result.fieldResults()) yield jsonComparison(f);
+        for (const f of result.discrepancies) yield jsonComparison(f);
       }),
     },
   };

@@ -1,24 +1,23 @@
 {
+  "schema_version": "1.0",
   "name": "core_hr_vs_payroll",
   "left": {
-    "name": "core_hr",
-    "type": "csv",
-    "path": "core_hr.csv"
+    "name": "core_hr"
   },
   "right": {
-    "name": "payroll",
-    "type": "csv",
-    "path": "payroll.csv"
+    "name": "payroll"
   },
   "identity": {
     "left": "person_id",
-    "right": "employee_number"
+    "right": "employee_number",
+    "normalize": []
   },
   "fields": [
     {
       "name": "first_name",
       "left": "first_name",
       "right": "given_name",
+      "mode": "Custom",
       "normalize": [
         "trim",
         "casefold"
@@ -29,6 +28,7 @@
       "name": "last_name",
       "left": "last_name",
       "right": "surname",
+      "mode": "Custom",
       "normalize": [
         "trim",
         "casefold"
@@ -39,6 +39,7 @@
       "name": "company",
       "left": "company",
       "right": "company_code",
+      "mode": "Value mapping",
       "normalize": [],
       "value_mapping": "company"
     }

@@ -1,19 +1,19 @@
-record_type,identity,field_name,left_raw_value,right_raw_value,left_normalized_value,right_normalized_value,left_canonical_value,right_canonical_value,mapping_name,comparison_status,identity_status
-identity,10,,,,,,,,,,MISSING_LEFT
-identity,11,,,,,,,,,,MISSING_RIGHT
-identity,12,,,,,,,,,,DUPLICATE_LEFT
-identity,13,,,,,,,,,,DUPLICATE_RIGHT
-identity,14,,,,,,,,,,DUPLICATE_LEFT
-identity,14,,,,,,,,,,DUPLICATE_RIGHT
-identity,,,,,,,,,,,MISSING_IDENTITY_LEFT
-identity,  ,,,,,,,,,,MISSING_IDENTITY_LEFT
-identity,,,,,,,,,,,MISSING_IDENTITY_RIGHT
+record_type,identity,field_name,left_raw_value,right_raw_value,left_normalized_value,right_normalized_value,left_canonical_value,right_canonical_value,mapping_name,comparison_status,identity_status,left_source_rows,right_source_rows
+identity,10,,,,,,,,,,MISSING_LEFT,,12
+identity,11,,,,,,,,,,MISSING_RIGHT,12,
+identity,12,,,,,,,,,,DUPLICATE_LEFT,13;14,13
+identity,13,,,,,,,,,,DUPLICATE_RIGHT,15,14;15
+identity,14,,,,,,,,,,DUPLICATE_LEFT,16;17,16;17
+identity,14,,,,,,,,,,DUPLICATE_RIGHT,16;17,16;17
+identity,,,,,,,,,,,MISSING_IDENTITY_LEFT,18,
+identity,  ,,,,,,,,,,MISSING_IDENTITY_LEFT,19,
+identity,,,,,,,,,,,MISSING_IDENTITY_RIGHT,,18
 field_comparison,4,text,"left,""quoted""
 line","right,""quoted""
 line","left,""quoted""
 line","right,""quoted""
-line",,,,MISMATCH,
-field_comparison,5,text,,present,,present,,,,LEFT_NULL,
-field_comparison,6,text,right,,right,,,,,RIGHT_NULL,
-field_comparison,8,mapped,unknown-left,R,unknown-left,R,,CANONICAL,codes,UNMAPPED_LEFT,
-field_comparison,9,mapped,L,unknown-right,L,unknown-right,CANONICAL,,codes,UNMAPPED_RIGHT,
+line",,,,MISMATCH,,5,5
+field_comparison,5,text,,present,,present,,,,LEFT_NULL,,7,7
+field_comparison,6,text,right,,right,,,,,RIGHT_NULL,,8,8
+field_comparison,8,mapped,unknown-left,R,unknown-left,R,,CANONICAL,codes,UNMAPPED_LEFT,,10,10
+field_comparison,9,mapped,L,unknown-right,L,unknown-right,CANONICAL,,codes,UNMAPPED_RIGHT,,11,11

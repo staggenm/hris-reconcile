@@ -4,6 +4,13 @@ export interface Dataset {
   name: string;
   columns: string[];
   records: RecordRow[];
+  // Physical source line on which each record starts (header = line 1).
+  // Datasets built without a file fall back to index + 2 (see recordLine).
+  recordLines?: number[];
+}
+
+export function recordLine(dataset: Dataset, index: number): number {
+  return dataset.recordLines?.[index] ?? index + 2;
 }
 
 export interface DatasetSummary {
@@ -28,6 +35,9 @@ export interface IdentityResult {
   status: IdentityStatus;
   leftRecord?: RecordRow;
   rightRecord?: RecordRow;
+  // Source lines of every record with this identity (both sides of duplicates).
+  leftLines: number[];
+  rightLines: number[];
 }
 
 export type FieldComparisonStatus =
@@ -90,6 +100,9 @@ export interface FieldComparisonResult {
   rightCanonicalValue: string | null;
   status: FieldComparisonStatus;
   mappingName?: string | null;
+  // Source lines of the compared records (0 only for direct comparator calls without a source).
+  leftLine: number;
+  rightLine: number;
 }
 
 export interface DatasetStatistics {

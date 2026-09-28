@@ -49,7 +49,8 @@ describe("excelSafe CSV export", () => {
 
   it("never changes the JSON report", () => {
     const report = JSON.parse(generateReconciliationJson(contract, result));
-    expect(report.details.identities.map((item: { identity: string }) => item.identity)).toContain("=1+1");
+    expect(report.details.field_comparisons.map((item: { left_raw_value: string }) => item.left_raw_value))
+      .toEqual(["@SUM(A1)", "=HYPERLINK(\"http://x\",\"a,b\")"]);
     expect(JSON.stringify(report)).not.toContain("'");
   });
 });

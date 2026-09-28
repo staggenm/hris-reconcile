@@ -108,13 +108,14 @@ export function reconcileInWorker(options: {
   return requestWorker("reconcile", payload, sessionGeneration);
 }
 
-export function queryWorker<T>(type: "pairs" | "details" | "matching-details" | "export" | "suggest-identity" | "score-identity" | "mapping-evidence", options: Record<string, unknown>, sessionGeneration: number): Promise<T> {
+export function queryWorker<T>(type: "pairs" | "details" | "matching-details" | "identity-issues" | "export" | "suggest-identity" | "score-identity" | "mapping-evidence", options: Record<string, unknown>, sessionGeneration: number): Promise<T> {
   return requestWorker(type, options, sessionGeneration);
 }
 
 export function parseAndProfileInWorker(options: {
   content: ArrayBuffer;
   name: string;
+  fileName: string;
   side: "left" | "right";
   encoding: CsvEncoding;
   sessionGeneration: number;

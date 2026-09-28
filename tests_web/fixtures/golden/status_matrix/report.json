@@ -1,21 +1,90 @@
 {
+  "report_format_version": "2.0",
   "run_metadata": {
-    "format_version": "1.0",
-    "engine_version": "0.3.0",
-    "processing_mode": "browser"
+    "app_version": "1.0.0",
+    "generated_at": "2026-01-01T00:00:00.000Z",
+    "processing_mode": "browser",
+    "excel_safe": true,
+    "limits": {
+      "max_file_bytes": 104857600,
+      "max_rows": 200000,
+      "max_columns": 200,
+      "max_cells": 8000000,
+      "max_comparisons": 6000000,
+      "max_discrepancies": 1500000
+    }
   },
-  "contract_name": "status_matrix",
-  "datasets": {
+  "sources": {
     "left": {
       "name": "left",
+      "file_name": "left.csv",
+      "encoding": "utf-8",
+      "sha256": "09dbd874d9a3fb73ec167eaaba48727ed0fa331106da5c17e4e4596e61119638",
+      "byte_length": 237,
       "record_count": 17,
       "column_count": 3
     },
     "right": {
       "name": "right",
+      "file_name": "right.csv",
+      "encoding": "utf-8",
+      "sha256": "3857d40b9b0f07445ae3dc637a9d3ada732ee53a1cbc3b038b5de49d1cc9bba2",
+      "byte_length": 226,
       "record_count": 16,
       "column_count": 3
     }
+  },
+  "contract": {
+    "schema_version": "1.0",
+    "name": "status_matrix",
+    "left": {
+      "name": "left"
+    },
+    "right": {
+      "name": "right"
+    },
+    "identity": {
+      "left": "id",
+      "right": "id",
+      "normalize": []
+    },
+    "fields": [
+      {
+        "name": "text",
+        "left": "text",
+        "right": "text",
+        "mode": "Custom",
+        "normalize": [
+          "trim",
+          "casefold"
+        ],
+        "value_mapping": null
+      },
+      {
+        "name": "mapped",
+        "left": "mapped",
+        "right": "mapped",
+        "mode": "Value mapping",
+        "normalize": [],
+        "value_mapping": "codes"
+      }
+    ],
+    "value_mappings": {
+      "codes": {
+        "CANONICAL": {
+          "left": [
+            "L"
+          ],
+          "right": [
+            "R"
+          ]
+        }
+      }
+    }
+  },
+  "detail_scope": {
+    "kind": "discrepancies_and_identity_issues",
+    "description": "details.identities lists identity issues only (every status except MATCHED); details.field_comparisons lists discrepancies only (MISMATCH, LEFT_NULL, RIGHT_NULL, UNMAPPED_LEFT, UNMAPPED_RIGHT). Matches are counted in identity_summary and field_comparison_summary. full.csv contains every identity and every comparison."
   },
   "identity_summary": {
     "MATCHED": 9,
@@ -40,154 +109,98 @@
   "details": {
     "identities": [
       {
-        "identity": "001",
-        "status": "MATCHED"
-      },
-      {
         "identity": "10",
-        "status": "MISSING_LEFT"
+        "status": "MISSING_LEFT",
+        "left_rows": [],
+        "right_rows": [
+          12
+        ]
       },
       {
         "identity": "11",
-        "status": "MISSING_RIGHT"
+        "status": "MISSING_RIGHT",
+        "left_rows": [
+          12
+        ],
+        "right_rows": []
       },
       {
         "identity": "12",
-        "status": "DUPLICATE_LEFT"
+        "status": "DUPLICATE_LEFT",
+        "left_rows": [
+          13,
+          14
+        ],
+        "right_rows": [
+          13
+        ]
       },
       {
         "identity": "13",
-        "status": "DUPLICATE_RIGHT"
+        "status": "DUPLICATE_RIGHT",
+        "left_rows": [
+          15
+        ],
+        "right_rows": [
+          14,
+          15
+        ]
       },
       {
         "identity": "14",
-        "status": "DUPLICATE_LEFT"
+        "status": "DUPLICATE_LEFT",
+        "left_rows": [
+          16,
+          17
+        ],
+        "right_rows": [
+          16,
+          17
+        ]
       },
       {
         "identity": "14",
-        "status": "DUPLICATE_RIGHT"
-      },
-      {
-        "identity": "2",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "3",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "4",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "5",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "6",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "7",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "8",
-        "status": "MATCHED"
-      },
-      {
-        "identity": "9",
-        "status": "MATCHED"
+        "status": "DUPLICATE_RIGHT",
+        "left_rows": [
+          16,
+          17
+        ],
+        "right_rows": [
+          16,
+          17
+        ]
       },
       {
         "identity": null,
-        "status": "MISSING_IDENTITY_LEFT"
+        "status": "MISSING_IDENTITY_LEFT",
+        "left_rows": [
+          18
+        ],
+        "right_rows": []
       },
       {
         "identity": "  ",
-        "status": "MISSING_IDENTITY_LEFT"
+        "status": "MISSING_IDENTITY_LEFT",
+        "left_rows": [
+          19
+        ],
+        "right_rows": []
       },
       {
         "identity": null,
-        "status": "MISSING_IDENTITY_RIGHT"
+        "status": "MISSING_IDENTITY_RIGHT",
+        "left_rows": [],
+        "right_rows": [
+          18
+        ]
       }
     ],
     "field_comparisons": [
       {
-        "identity": "001",
-        "field_name": "text",
-        "left_raw_value": "Exact",
-        "right_raw_value": "Exact",
-        "left_normalized_value": "exact",
-        "right_normalized_value": "exact",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "001",
-        "field_name": "mapped",
-        "left_raw_value": "L",
-        "right_raw_value": "L",
-        "left_normalized_value": "L",
-        "right_normalized_value": "L",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": "codes"
-      },
-      {
-        "identity": "2",
-        "field_name": "text",
-        "left_raw_value": " Straße ",
-        "right_raw_value": "STRASSE",
-        "left_normalized_value": "strasse",
-        "right_normalized_value": "strasse",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_NORMALIZED",
-        "mapping_name": null
-      },
-      {
-        "identity": "2",
-        "field_name": "mapped",
-        "left_raw_value": "L",
-        "right_raw_value": "L",
-        "left_normalized_value": "L",
-        "right_normalized_value": "L",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": "codes"
-      },
-      {
-        "identity": "3",
-        "field_name": "text",
-        "left_raw_value": "Same",
-        "right_raw_value": "Same",
-        "left_normalized_value": "same",
-        "right_normalized_value": "same",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "3",
-        "field_name": "mapped",
-        "left_raw_value": "L",
-        "right_raw_value": "R",
-        "left_normalized_value": "L",
-        "right_normalized_value": "R",
-        "left_canonical_value": "CANONICAL",
-        "right_canonical_value": "CANONICAL",
-        "status": "MATCH_MAPPED",
-        "mapping_name": "codes"
-      },
-      {
         "identity": "4",
         "field_name": "text",
+        "left_row": 5,
+        "right_row": 5,
         "left_raw_value": "left,\"quoted\"\r\nline",
         "right_raw_value": "right,\"quoted\"\r\nline",
         "left_normalized_value": "left,\"quoted\"\r\nline",
@@ -198,20 +211,10 @@
         "mapping_name": null
       },
       {
-        "identity": "4",
-        "field_name": "mapped",
-        "left_raw_value": "L",
-        "right_raw_value": "L",
-        "left_normalized_value": "L",
-        "right_normalized_value": "L",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": "codes"
-      },
-      {
         "identity": "5",
         "field_name": "text",
+        "left_row": 7,
+        "right_row": 7,
         "left_raw_value": null,
         "right_raw_value": "present",
         "left_normalized_value": null,
@@ -222,20 +225,10 @@
         "mapping_name": null
       },
       {
-        "identity": "5",
-        "field_name": "mapped",
-        "left_raw_value": "L",
-        "right_raw_value": "L",
-        "left_normalized_value": "L",
-        "right_normalized_value": "L",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": "codes"
-      },
-      {
         "identity": "6",
         "field_name": "text",
+        "left_row": 8,
+        "right_row": 8,
         "left_raw_value": "right",
         "right_raw_value": null,
         "left_normalized_value": "right",
@@ -246,56 +239,10 @@
         "mapping_name": null
       },
       {
-        "identity": "6",
-        "field_name": "mapped",
-        "left_raw_value": "L",
-        "right_raw_value": "L",
-        "left_normalized_value": "L",
-        "right_normalized_value": "L",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": "codes"
-      },
-      {
-        "identity": "7",
-        "field_name": "text",
-        "left_raw_value": null,
-        "right_raw_value": null,
-        "left_normalized_value": null,
-        "right_normalized_value": null,
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "BOTH_NULL",
-        "mapping_name": null
-      },
-      {
-        "identity": "7",
-        "field_name": "mapped",
-        "left_raw_value": "L",
-        "right_raw_value": "L",
-        "left_normalized_value": "L",
-        "right_normalized_value": "L",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": "codes"
-      },
-      {
-        "identity": "8",
-        "field_name": "text",
-        "left_raw_value": "Same",
-        "right_raw_value": "Same",
-        "left_normalized_value": "same",
-        "right_normalized_value": "same",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
         "identity": "8",
         "field_name": "mapped",
+        "left_row": 10,
+        "right_row": 10,
         "left_raw_value": "unknown-left",
         "right_raw_value": "R",
         "left_normalized_value": "unknown-left",
@@ -307,19 +254,9 @@
       },
       {
         "identity": "9",
-        "field_name": "text",
-        "left_raw_value": "Same",
-        "right_raw_value": "Same",
-        "left_normalized_value": "same",
-        "right_normalized_value": "same",
-        "left_canonical_value": null,
-        "right_canonical_value": null,
-        "status": "MATCH_EXACT",
-        "mapping_name": null
-      },
-      {
-        "identity": "9",
         "field_name": "mapped",
+        "left_row": 11,
+        "right_row": 11,
         "left_raw_value": "L",
         "right_raw_value": "unknown-right",
         "left_normalized_value": "L",

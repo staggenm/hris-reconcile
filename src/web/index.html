@@ -86,6 +86,7 @@
           <label><input type="checkbox" value="casefold">Ignore case</label>
         </fieldset>
         <p id="identity-evidence" class="caption"></p>
+        <label class="file-picker secondary contract-picker">Load saved contract<input id="contract-file" type="file" accept=".json,application/json"></label>
         <button id="confirm-identity">Confirm employee identity</button>
         <span id="identity-confirmed" class="success hidden" role="status" aria-live="polite">Employee identity fields confirmed.</span>
       </div>
@@ -119,7 +120,7 @@
         <h2 id="step-run-title">Run comparison</h2>
         <label>Reconciliation name<input id="contract-name" type="text"></label>
         <p id="run-summary" class="caption"></p>
-        <button id="run-reconciliation">Run reconciliation</button>
+        <div class="actions"><button id="run-reconciliation">Run reconciliation</button><button id="save-contract" class="secondary">Save contract (JSON)</button></div>
       </div>
     </section>
 
@@ -128,6 +129,8 @@
       <div class="step-body">
         <h2 id="step-results-title">Explore discrepancies</h2>
         <div id="metrics" class="metrics"></div>
+        <h3>Identity issues</h3>
+        <div id="identity-issues"></div>
         <h3>Mismatch analysis by field</h3>
         <div id="field-summary"></div>
         <div id="pair-panel" class="hidden">

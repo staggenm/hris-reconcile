@@ -11,7 +11,7 @@ export interface MappingEditorRow {
   accepted: boolean;
   count: number;
   consistency_percentage: number;
-  assessment: "High confidence" | "Review" | "Manual";
+  assessment: "High confidence" | "Review" | "Manual" | "Imported";
 }
 
 // Render-only label for a null value (used as the input placeholder).

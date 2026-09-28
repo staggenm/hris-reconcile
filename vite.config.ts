@@ -1,7 +1,10 @@
 import { defineConfig, Plugin } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import { createHash } from "crypto";
+import { readFileSync } from "fs";
 import { resolve } from "path";
+
+const APP_VERSION: string = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8")).version;
 
 // The build's single output: `npm run build` updates the tracked artifact directly.
 const ARTIFACT = "hris-reconcile.html";
@@ -84,6 +87,7 @@ export default defineConfig({
   plugins: [entryCsp(), viteSingleFile(), cspHashes()],
   define: {
     __HRIS_BENCH__: JSON.stringify(process.env.HRIS_BENCH === "1"),
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
   },
   build: {
     outDir: resolve(__dirname, "dist"),

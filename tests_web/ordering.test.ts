@@ -30,7 +30,7 @@ const mismatch = (fieldName: string, left: string | null, right: string | null):
   identity: "1", fieldName, leftRawValue: left, rightRawValue: right,
   leftNormalizedValue: left, rightNormalizedValue: right,
   leftCanonicalValue: null, rightCanonicalValue: null,
-  status: left === null ? "left_null" : "mismatch", mappingName: null,
+  leftLine: 2, rightLine: 2, status: left === null ? "left_null" : "mismatch", mappingName: null,
 });
 const resultOf = (fieldResults: FieldComparisonResult[]) => resultFromComparisons(fieldResults);
 

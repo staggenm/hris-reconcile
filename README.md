@@ -172,16 +172,51 @@ delivered HTML stays self-contained and offline.
   CSV and JSON outputs. An intended behaviour change regenerates them with
   `UPDATE_GOLDEN=1 npx vitest run tests_web/golden.test.ts`, and the diff is
   reviewed and committed with the change.
-- **Report schema**: `schemas/report.schema.json` (JSON Schema draft 2020-12)
-  defines the JSON report. Every golden report is validated against it.
+- **Schemas** (JSON Schema draft 2020-12): `schemas/report-2.0.schema.json`
+  defines the JSON report and `schemas/contract-1.0.schema.json` the contract
+  document. Every golden report is validated against the report schema, and
+  the report's embedded contract definition must equal the contract schema.
 - **Unicode data**: `src/web/core/unicode_casefold.ts` is committed source with
   a SHA-256 pinned by `tests_web/unicode_data.test.ts`.
 
 ## JSON report
 
-The JSON report has a versioned run-metadata section, contract and dataset
-statistics, complete identity and field-status summaries, and detailed decision
-records. Its shape is defined by `schemas/report.schema.json`.
+The JSON report (format 2.0, `schemas/report-2.0.schema.json`) is the audit
+record of a run:
+
+- `report_format_version`, and `run_metadata` with the app version (from
+  `package.json`), `generated_at` (ISO-8601 UTC), the CSV formula-neutralization
+  setting (`excel_safe`), and the limits in effect.
+- `sources`: for each file, the logical name, file name, encoding, byte length,
+  shape, and a SHA-256 of the raw bytes computed before decoding.
+- `contract`: the full contract (identity and its normalizers, fields and
+  modes, grouped value mappings) as a contract document with its
+  `schema_version`.
+- `identity_summary` and `field_comparison_summary`: counts for every status.
+- `details`: **identity issues and discrepancies only**. Matched identities
+  and matching comparisons are counted in the summaries but not listed.
+  `detail_scope` states this in the report itself. **`full.csv` is the
+  complete record** of every identity and comparison.
+
+Every detail row carries source rows: the physical line on which the record
+starts in its file (header = line 1; quoted multi-line values count every
+line). Identity issues list the rows on both sides, including every record of a
+duplicate. Comparisons have `left_row` and `right_row`. Both CSV exports have
+`left_source_rows` and `right_source_rows` columns, and the UI's identity-issues
+and employee-detail tables show the rows.
+
+`schemas/report-1.0.schema.json` is the superseded 1.0 format, kept for
+reference.
+
+## Contracts
+
+**Save contract (JSON)** (step 5) downloads the configuration as a contract
+document (`schemas/contract-1.0.schema.json`, `schema_version` "1.0").
+**Load saved contract** (step 2, after uploading both files) validates it,
+checks every required column against the uploaded files (for example
+`COLUMNS_MISSING: ... Dataset B is missing 'company_code'`), and pre-fills
+every wizard step up to **Run comparison**. Fields whose normalizers the wizard
+cannot express (mode `Custom`) are reported, not silently changed.
 
 ## Security and privacy
 
