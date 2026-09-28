@@ -21,6 +21,8 @@ import {
   selectionsFromRows,
   valueFromInput,
 } from "./ui/mapping_editor";
+import { metricTiles } from "./ui/metrics";
+import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, Progress, reach, STEP_IDS, stepStates } from "./ui/steps";
 import { onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
 import {
   ComparisonMode,
@@ -58,6 +60,7 @@ const uploadGeneration: Record<"left" | "right", number> = { left: 0, right: 0 }
 const chosenFiles: Record<"left" | "right", File | null> = { left: null, right: null };
 const downloadUrls = new Set<string>();
 const mappingPages = new WeakMap<MappingEditorState, number>();
+let progress: Progress = INITIAL_PROGRESS;
 
 const state: AppState = {
   left: null,
@@ -97,6 +100,20 @@ function node<K extends keyof HTMLElementTagNameMap>(
 
 function show(selector: string, visible = true): void {
   $(selector).classList.toggle("hidden", !visible);
+}
+
+// Step visibility and the "confirmed" badges follow the step state machine.
+function setProgress(next: Progress): void {
+  progress = next;
+  const states = stepStates(progress);
+  for (const step of STEP_IDS) show(`#step-${step}`, states[step] !== "hidden");
+  show("#identity-confirmed", states.identity === "done");
+  show("#fields-confirmed", states.fields === "done");
+  show("#mappings-confirmed", states.mappings === "done");
+}
+
+function edit(kind: EditKind): void {
+  setProgress(invalidate(progress, kind).progress);
 }
 
 function showError(error: unknown): void {
@@ -162,24 +179,15 @@ function invalidateAfterUpload(): void {
   for (const selector of ["#identity-suggestion", "#identity-evidence", "#field-rows", "#mapping-editors", "#run-summary", "#metrics", "#identity-issues", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
     $(selector).replaceChildren();
   }
-  for (const selector of ["#identity-confirmed", "#fields-confirmed", "#mappings-confirmed"]) show(selector, false);
   show("#pair-panel", false);
-  for (const selector of [
-    "#step-identity",
-    "#step-fields",
-    "#step-mappings",
-    "#step-run",
-    "#step-results",
-  ]) {
-    show(selector, false);
-  }
 }
 
-async function upload(side: "left" | "right", file: File): Promise<void> {
+async function upload(side: "left" | "right", file: File, kind: EditKind = `${side}-file`): Promise<void> {
   clearError();
   chosenFiles[side] = file;
   const session = sessionGeneration;
   const request = ++uploadGeneration[side];
+  edit(kind);
   invalidateAfterUpload();
   state[side] = null;
   $(`#${side}-dataset`).replaceChildren();
@@ -229,7 +237,8 @@ function renderDataset(
       return;
     }
     data.name = trimmed;
-    show("#step-results", false);
+    invalidateResults();
+    edit("dataset-name");
   });
   label.append(nameInput);
 
@@ -294,20 +303,20 @@ async function startIdentity(): Promise<void> {
   $("#left-identity").replaceWith(leftSelect);
   $("#right-identity").replaceWith(rightSelect);
 
-  leftSelect.addEventListener("change", () => { void scoreIdentity().catch(showError); });
-  rightSelect.addEventListener("change", () => { void scoreIdentity().catch(showError); });
-  await scoreIdentity();
-  show("#step-identity");
+  leftSelect.addEventListener("change", () => { void scoreIdentity("identity-columns").catch(showError); });
+  rightSelect.addEventListener("change", () => { void scoreIdentity("identity-columns").catch(showError); });
+  await scoreIdentity("identity-columns");
+  setProgress(confirmStep(progress, "upload"));
 }
 
-async function scoreIdentity(): Promise<void> {
+async function scoreIdentity(kind: EditKind): Promise<void> {
   if (!state.left || !state.right) return;
+  edit(kind);
   state.identity = null;
   state.fields = [];
   state.pairs = [];
   invalidateResults();
   for (const selector of ["#field-rows", "#mapping-editors", "#run-summary"]) $(selector).replaceChildren();
-  for (const selector of ["#fields-confirmed", "#mappings-confirmed"]) show(selector, false);
   const leftCol = ($("#left-identity") as HTMLSelectElement).value;
   const rightCol = ($("#right-identity") as HTMLSelectElement).value;
 
@@ -318,12 +327,6 @@ async function scoreIdentity(): Promise<void> {
   $("#identity-evidence").textContent = `Conservative trimmed/case-insensitive value overlap for selection: ${evidence.overlap_percentage.toFixed(
     1,
   )}%. Reconciliation matches identities exactly unless identity normalization is selected below.`;
-
-  show("#identity-confirmed", false);
-  show("#step-fields", false);
-  show("#step-mappings", false);
-  show("#step-run", false);
-  show("#step-results", false);
 }
 
 function identityNormalizerInputs(): HTMLInputElement[] {
@@ -340,7 +343,6 @@ function confirmIdentity(): void {
   const rightCol = ($("#right-identity") as HTMLSelectElement).value;
 
   state.identity = { left_column: leftCol, right_column: rightCol, normalize: selectedIdentityNormalizers() };
-  show("#identity-confirmed");
 
   const suggestions = suggestFieldMappings(
     state.left.columns,
@@ -358,7 +360,7 @@ function confirmIdentity(): void {
   }));
 
   renderFieldRows();
-  show("#step-fields");
+  setProgress(confirmStep(progress, "identity"));
 }
 
 function renderFieldRows(): void {
@@ -411,10 +413,7 @@ function renderFieldRows(): void {
 
 function fieldsChanged(): void {
   invalidateResults();
-  show("#fields-confirmed", false);
-  show("#step-mappings", false);
-  show("#step-run", false);
-  show("#step-results", false);
+  edit("field-mappings");
 }
 
 function invalidateResults(): void {
@@ -422,7 +421,6 @@ function invalidateResults(): void {
   state.contract = null;
   state.result = null;
   state.resultPairs = [];
-  show("#step-results", false);
   for (const selector of ["#metrics", "#identity-issues", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
     $(selector).replaceChildren();
   }
@@ -459,9 +457,8 @@ function confirmFields(): void {
     return;
   }
 
-  show("#fields-confirmed");
+  setProgress(confirmStep(progress, "fields"));
   void renderMappingEditors().catch(showError);
-  show("#step-mappings");
 }
 
 async function renderMappingEditors(): Promise<void> {
@@ -621,9 +618,8 @@ function mappingTable(editor: MappingEditorState): HTMLDivElement {
 }
 
 function mappingChanged(): void {
-  show("#mappings-confirmed", false);
-  show("#step-run", false);
   invalidateResults();
+  edit("value-mappings");
 }
 
 function confirmMappings(): void {
@@ -645,8 +641,7 @@ function confirmMappings(): void {
     showError(error);
     return;
   }
-  show("#mappings-confirmed");
-  show("#step-run");
+  setProgress(confirmStep(progress, "mappings"));
 }
 
 function buildCurrentContract(): ReconciliationContract {
@@ -668,6 +663,7 @@ function buildCurrentContract(): ReconciliationContract {
 async function runReconciliation(): Promise<void> {
   if (!state.left || !state.right || !state.identity) return;
   invalidateResults();
+  setProgress(reach("run"));
   const configGeneration = runGeneration;
   const currentSession = sessionGeneration;
   const contract = buildCurrentContract();
@@ -687,7 +683,7 @@ async function runReconciliation(): Promise<void> {
   renderFieldSummary(dashboard.fields);
   $("#matching-summary").replaceChildren(node("p", `${dashboard.matchingCount.toLocaleString()} matching comparisons. Expand to load details.`, "caption"));
 
-  show("#step-results");
+  setProgress(confirmStep(progress, "run"));
   $("#step-results").scrollIntoView({ behavior: "smooth" });
 }
 
@@ -744,18 +740,14 @@ async function loadContract(file: File): Promise<void> {
   for (const input of identityNormalizerInputs()) input.checked = wizard.identity.normalize.includes(input.value as IdentityNormalizerName);
   $("#identity-evidence").textContent = `Loaded contract '${contract.name}' from ${file.name}.`;
   state.identity = wizard.identity;
-  show("#identity-confirmed");
-
   state.fields = wizard.fields;
   renderFieldRows();
-  show("#step-fields");
-  show("#fields-confirmed");
 
   state.pairs = wizard.fields
     .filter((field) => field.mode === "Value mapping")
     .map((field) => ({ field: { left_column: field.left_column, right_column: field.right_column }, rows: wizard.mappingRows.get(field.left_column) ?? [] }));
   renderMappingEditorsFromState();
-  show("#step-mappings");
+  setProgress(reach("mappings"));
 
   confirmMappings();
   ($("#contract-name") as HTMLInputElement).value = contract.name;
@@ -772,21 +764,9 @@ async function loadMatchingDetails(pageNumber: number): Promise<void> {
 function renderMetrics(summary: ResultsSummary): void {
   const target = $("#metrics");
   target.replaceChildren();
-  const values: [number, string][] = [
-    [summary.datasets.left.record_count, `${summary.datasets.left.name} records`],
-    [summary.datasets.right.record_count, `${summary.datasets.right.name} records`],
-    [summary.metrics.matched_employees, "Matched employees"],
-    [summary.metrics.missing_left, "Missing in Dataset A"],
-    [summary.metrics.missing_right, "Missing in Dataset B"],
-    [summary.metrics.duplicate_identities, "Duplicate identities"],
-    [summary.metrics.missing_identities, "Missing identity values"],
-    [summary.metrics.field_matches, "Field matches"],
-    [summary.metrics.field_discrepancies, "Field discrepancies"],
-    [summary.metrics.unmapped_values, "Unmapped values"],
-  ];
-  for (const [val, lbl] of values) {
+  for (const metric of metricTiles(summary)) {
     const tile = node("div", "", "metric");
-    tile.append(node("strong", String(val)), node("span", lbl));
+    tile.append(node("strong", String(metric.value)), node("span", metric.label));
     target.append(tile);
   }
 }
@@ -999,6 +979,7 @@ function clearSession(): void {
   ($("#right-file") as HTMLInputElement).value = "";
 
   invalidateAfterUpload();
+  setProgress(INITIAL_PROGRESS);
   clearError();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -1069,7 +1050,7 @@ rightFileInput.addEventListener("change", (e) => {
 });
 
 for (const input of identityNormalizerInputs()) {
-  input.addEventListener("change", () => { void scoreIdentity().catch(showError); });
+  input.addEventListener("change", () => { void scoreIdentity("identity-normalizers").catch(showError); });
 }
 
 $("#contract-file").addEventListener("change", (event) => {
@@ -1091,7 +1072,7 @@ onWorkerCrash((error) => {
 for (const side of ["left", "right"] as const) {
   $(`#${side}-encoding`).addEventListener("change", () => {
     const file = chosenFiles[side];
-    if (file) upload(side, file).catch(showError);
+    if (file) upload(side, file, `${side}-encoding`).catch(showError);
   });
 }
 
