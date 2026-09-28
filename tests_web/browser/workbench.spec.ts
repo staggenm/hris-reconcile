@@ -496,3 +496,37 @@ test("a saved contract re-imports into a fresh session and reproduces the same f
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+async function stepStates(page: import("@playwright/test").Page) {
+  return page.locator("section.step").evaluateAll((steps) =>
+    Object.fromEntries(steps.map((step) => [step.id.replace("step-", ""), (step as HTMLElement).dataset.state ?? "hidden"])));
+}
+
+test("steps expose data-state, metric tiles data-tone, and a reset explains itself", async ({ page }) => {
+  await page.goto(artifact);
+  expect(await stepStates(page)).toMatchObject({ upload: "active", identity: "hidden" });
+  await page.locator("#left-file").setInputFiles({ name: "left.csv", mimeType: "text/csv", buffer: Buffer.from(leftRichCsv) });
+  await page.locator("#right-file").setInputFiles({ name: "right.csv", mimeType: "text/csv", buffer: Buffer.from(rightRichCsv) });
+  await expect(page.locator("#step-identity")).toHaveAttribute("data-state", "active");
+  expect(await stepStates(page)).toMatchObject({ upload: "done", identity: "active", fields: "hidden" });
+  await page.locator("#confirm-identity").click();
+  await page.locator("#field-rows select").nth(5).selectOption("Value mapping");
+  await page.locator("#confirm-fields").click();
+  await page.locator("#confirm-mappings").click();
+  await page.locator("#run-reconciliation").click();
+  await expect(page.locator("#step-results")).toHaveAttribute("data-state", "active");
+  expect(await stepStates(page)).toEqual({ upload: "done", identity: "done", fields: "done", mappings: "done", run: "done", results: "active" });
+
+  const tones = await page.locator(".metric").evaluateAll((tiles) =>
+    Object.fromEntries(tiles.map((tile) => [tile.querySelector("span")!.textContent, (tile as HTMLElement).dataset.tone])));
+  expect(tones).toMatchObject({ "Matched employees": "ok", "Field discrepancies": "ok", "Missing in Dataset A": "ok", "left records": "neutral" });
+
+  await page.locator("#mapping-editors input[type=text]").nth(0).fill("NEW_CANONICAL");
+  await page.locator("#mapping-editors input[type=text]").nth(0).blur();
+  await expect(page.locator("#step-mappings")).toHaveAttribute("data-state", "stale");
+  await expect(page.locator("#step-mappings .step-note")).toHaveText("Results reset because the value mappings changed.");
+  expect(await stepStates(page)).toMatchObject({ mappings: "stale", run: "hidden", results: "hidden" });
+  await page.locator("#confirm-mappings").click();
+  await expect(page.locator("#step-mappings")).toHaveAttribute("data-state", "done");
+  await expect(page.locator("#step-mappings .step-note")).toHaveCount(0);
+});

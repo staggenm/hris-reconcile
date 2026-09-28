@@ -22,7 +22,7 @@ import {
   valueFromInput,
 } from "./ui/mapping_editor";
 import { metricTiles } from "./ui/metrics";
-import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, Progress, reach, STEP_IDS, stepStates } from "./ui/steps";
+import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, invalidationNote, Progress, reach, STEP_IDS, stepStates } from "./ui/steps";
 import { onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
 import {
   ComparisonMode,
@@ -102,11 +102,23 @@ function show(selector: string, visible = true): void {
   $(selector).classList.toggle("hidden", !visible);
 }
 
-// Step visibility and the "confirmed" badges follow the step state machine.
+// Step visibility, data-state, reset notes, and the "confirmed" badges all
+// follow the step state machine.
 function setProgress(next: Progress): void {
   progress = next;
   const states = stepStates(progress);
-  for (const step of STEP_IDS) show(`#step-${step}`, states[step] !== "hidden");
+  for (const step of STEP_IDS) {
+    const section = $(`#step-${step}`);
+    section.classList.toggle("hidden", states[step] === "hidden");
+    if (states[step] === "hidden") delete section.dataset.state;
+    else section.dataset.state = states[step];
+    section.querySelector(".step-note")?.remove();
+    if (states[step] === "stale" && progress.stale) {
+      const note = node("p", invalidationNote(progress.stale), "step-note");
+      note.setAttribute("role", "status");
+      section.querySelector("h2")!.after(note);
+    }
+  }
   show("#identity-confirmed", states.identity === "done");
   show("#fields-confirmed", states.fields === "done");
   show("#mappings-confirmed", states.mappings === "done");
@@ -766,6 +778,7 @@ function renderMetrics(summary: ResultsSummary): void {
   target.replaceChildren();
   for (const metric of metricTiles(summary)) {
     const tile = node("div", "", "metric");
+    tile.dataset.tone = metric.tone;
     tile.append(node("strong", String(metric.value)), node("span", metric.label));
     target.append(tile);
   }
@@ -1078,6 +1091,7 @@ for (const side of ["left", "right"] as const) {
 
 setupDragAndDrop("left");
 setupDragAndDrop("right");
+setProgress(INITIAL_PROGRESS);
 
 bind("#confirm-identity", "click", confirmIdentity);
 bind("#add-field", "click", addField);
