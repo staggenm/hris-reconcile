@@ -135,10 +135,16 @@ npm run verify         # the full CI pipeline (see below)
 
 The toolchain is pinned to Node 24.21.0 (`.nvmrc`, `engines`).
 
-`npm run verify` runs typecheck, Vitest, build, and Playwright, then checks that
-the fresh build equals the working-tree `dist/hris-reconcile.html` and that no
-step changed the working tree (ignoring `dist/`). Local flow: `npm run build` →
-`npm run verify` → commit.
+`npm run build` is the one command that updates the tracked artifact: it writes
+`dist/hris-reconcile.html` and nothing else.
+
+Local flow: **edit → `npm run build` → `npm run verify` → commit** (commit the
+rebuilt `dist/hris-reconcile.html` together with the source change).
+
+`npm run verify` runs typecheck, Vitest, a fresh build into a temporary
+directory, and Playwright, then checks that the fresh build equals the
+working-tree `dist/hris-reconcile.html` and that no step changed the working
+tree (ignoring `dist/`). It never writes into `dist/`.
 
 `npm run verify:ci` (run by `.github/workflows/ci.yml`, which reads `.nvmrc`)
 does the same but compares against the committed `dist/hris-reconcile.html`

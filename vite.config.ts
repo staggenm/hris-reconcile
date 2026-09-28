@@ -3,6 +3,8 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 import { createHash } from "crypto";
 import { resolve } from "path";
 
+// The build's single output: `npm run build` updates the tracked artifact directly.
+const ARTIFACT = "hris-reconcile.html";
 const SCRIPT_HASHES = "__CSP_SCRIPT_HASHES__";
 const STYLE_HASHES = "__CSP_STYLE_HASHES__";
 
@@ -71,6 +73,7 @@ function cspHashes(): Plugin {
         asset.source = html
           .replace(SCRIPT_HASHES, hashBlocks(html, "script"))
           .replace(STYLE_HASHES, hashBlocks(html, "style"));
+        if (asset.fileName === "index.html") asset.fileName = ARTIFACT;
       }
     },
   };

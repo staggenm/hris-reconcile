@@ -3,13 +3,15 @@
 // comparison → working-tree check.
 //
 //   npm run verify     local: the fresh build must equal the working-tree
-//                      dist/hris-reconcile.html (flow: build → verify → commit);
-//                      the tree check ignores dist/.
+//                      dist/hris-reconcile.html (flow: edit → `npm run build` →
+//                      verify → commit); the tree check ignores dist/.
 //   npm run verify:ci  CI: the fresh build must equal the committed dist, and
 //                      the working tree must be clean.
 import { spawnSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const ARTIFACT = "dist/hris-reconcile.html";
 const ci = process.argv.includes("--ci");
@@ -47,13 +49,16 @@ const before = treeState();
 
 step("typecheck", "npx", ["tsc", "--noEmit"]);
 step("vitest", "npx", ["vitest", "run"]);
-// Writes only the ignored dist/index.html; the tracked artifact is not touched.
-step("build", "npx", ["vite", "build"]);
+// Fresh build into a temp directory; verify never writes into dist/.
+const outDir = mkdtempSync(join(tmpdir(), "hris-verify-"));
+process.on("exit", () => rmSync(outDir, { recursive: true, force: true }));
+step("build (temp dir)", "npx", ["vite", "build", "--outDir", outDir, "--emptyOutDir"]);
+// Playwright tests the artifact in dist/, which the comparison below proves equal to the fresh build.
 step("playwright", "npx", ["playwright", "test"]);
 
 const reference = ci ? `committed ${ARTIFACT}` : `working-tree ${ARTIFACT}`;
 console.log(`\n▶ compare fresh build with ${reference}`);
-const built = readFileSync("dist/index.html");
+const built = readFileSync(join(outDir, "hris-reconcile.html"));
 const expected = ci ? git("show", `HEAD:${ARTIFACT}`) : readFileSync(ARTIFACT);
 if (!built.equals(expected)) {
   fail(`the fresh build differs from the ${reference}; run \`npm run build\`${ci ? " and commit the result" : ""}`);

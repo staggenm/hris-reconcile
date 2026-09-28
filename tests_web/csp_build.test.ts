@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { build } from "vite";
@@ -22,7 +22,9 @@ beforeAll(async () => {
       logLevel: "silent",
       build: { outDir, emptyOutDir: true },
     });
-    html = readFileSync(join(outDir, "index.html"), "utf8");
+    // The build emits exactly one file: the standalone artifact.
+    expect(readdirSync(outDir)).toEqual(["hris-reconcile.html"]);
+    html = readFileSync(join(outDir, "hris-reconcile.html"), "utf8");
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }
