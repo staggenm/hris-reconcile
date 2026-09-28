@@ -30,8 +30,8 @@ export function collapseWhitespace(value: string): string {
   return replacePythonWhitespace(value, " ").replace(/ +/g, " ");
 }
 
-// Python 3.12 str.isspace() code points. Keep this definition aligned with
-// the generated Unicode data provenance in scripts/generate_web_unicode_data.py.
+// Whitespace set equal to Python 3.12 str.isspace() (Unicode 15.0.0), pinned in
+// unicode_casefold.ts.
 const PYTHON_WHITESPACE = new Set(
   PYTHON_WHITESPACE_CODEPOINTS.map((codepoint) => String.fromCodePoint(codepoint)),
 );

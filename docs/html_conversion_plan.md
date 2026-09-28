@@ -1,5 +1,10 @@
 # Implementation Plan: In-Browser HTML Version of HRIS Reconciliation
 
+> **Note (2026-09-28):** The Python engine has been retired. The Python parity and
+> fixture-generation steps described below are historical. They were replaced by the
+> golden-file tests (`tests_web/golden.test.ts`) and the web-owned report schema
+> (`schemas/report.schema.json`).
+
 ## 1. Executive Summary & Strategic Rationale
 
 ### 1.1 Context

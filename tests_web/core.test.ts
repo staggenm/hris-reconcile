@@ -26,7 +26,7 @@ describe("Normalization", () => {
     expect(lowercase("Alpha")).toBe("alpha");
   });
 
-  it("casefolds Straße to strasse matching Python", () => {
+  it("casefolds Straße to strasse with full Unicode case folding", () => {
     expect(NORMALIZERS.resolve("casefold")("Straße")).toBe("strasse");
     expect(NORMALIZERS.resolve("casefold")("ẞ ı İ ΟΣ ς ﬃ")).toBe("ss ı i\u0307 οσ σ ffi");
     expect(NORMALIZERS.resolve("casefold")("Ꭰ ꭰ 𐐀")).toBe("Ꭰ Ꭰ 𐐨");

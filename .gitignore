@@ -9,7 +9,6 @@ htmlcov/
 output/
 dist/*
 !dist/hris-reconcile.html
-!dist/HRIS-Reconciliation.exe
 build/
 *.egg-info/
 .DS_Store

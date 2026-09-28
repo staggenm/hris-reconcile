@@ -8,8 +8,7 @@
     "dev": "vite",
     "build": "vite build && cp dist/index.html dist/hris-reconcile.html",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude tests_web/parity.test.ts",
-    "test:parity": "vitest run tests_web/parity.test.ts && .venv/bin/python scripts/generate_web_reference_fixtures.py --check && .venv/bin/python scripts/generate_web_unicode_data.py --check",
+    "test": "vitest run",
     "test:browser": "npm run build && playwright test",
     "test:watch": "vitest"
   },

@@ -54,7 +54,7 @@ export function validateMapping(
             `value mapping '${mappingName}' has ambiguous ${side} alias '${rawAlias}' between canonical entries '${prior}' and '${canonical}'`,
           );
         }
-        // Repeated aliases in one entry are also rejected, matching Python.
+        // Repeated aliases in one entry are also rejected (legacy rule).
         if (uniqueWithinEntry.has(alias)) {
           throw new Error(
             `value mapping '${mappingName}' has ambiguous ${side} alias '${rawAlias}' within canonical entry '${canonical}'`,
