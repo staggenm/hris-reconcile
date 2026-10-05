@@ -27,17 +27,7 @@ const BENCHMARKED_LIMITS: Limits = {
   maxDiscrepancies: 1_500_000,
 };
 
-// Benchmark builds measure beyond the limits.
-const UNLIMITED: Limits = {
-  maxFileBytes: Infinity,
-  maxRows: Infinity,
-  maxColumns: Infinity,
-  maxCells: Infinity,
-  maxComparisons: Infinity,
-  maxDiscrepancies: Infinity,
-};
-
-export const DEFAULT_LIMITS: Limits = __HRIS_BENCH__ ? UNLIMITED : BENCHMARKED_LIMITS;
+export const DEFAULT_LIMITS: Limits = BENCHMARKED_LIMITS;
 
 const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 

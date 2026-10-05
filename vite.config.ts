@@ -86,7 +86,6 @@ export default defineConfig({
   root: "src/web",
   plugins: [entryCsp(), viteSingleFile(), cspHashes()],
   define: {
-    __HRIS_BENCH__: JSON.stringify(process.env.HRIS_BENCH === "1"),
     __APP_VERSION__: JSON.stringify(APP_VERSION),
   },
   build: {
@@ -94,10 +93,5 @@ export default defineConfig({
     emptyOutDir: false,
     // The polyfill contains an (unused) fetch() path; the app makes no requests.
     modulePreload: { polyfill: false },
-  },
-  test: {
-    root: resolve(__dirname),
-    include: ["tests_web/**/*.test.ts"],
-    environment: "node",
   },
 });

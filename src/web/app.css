@@ -1,5 +1,5 @@
-/* HRIS Reconciliation theme. Based on docs/design/theme-reference.css, adapted:
-   system font stack; step and tile states come from data-state / data-tone set
+/* HRIS Reconciliation theme. Uses the system font stack; step and tile states
+   come from data-state / data-tone set
    in JS (src/web/ui/steps.ts, src/web/ui/metrics.ts), not :has() or position.
    CSP-safe: no external fonts or images; icons are data: SVG masks (img-src data:). */
 

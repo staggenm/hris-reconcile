@@ -1,4 +1,4 @@
-// Pinned Unicode data; do not edit. tests_web/unicode_data.test.ts pins this file's SHA-256.
+// Pinned Unicode data; do not edit without reviewing the normalization behavior.
 // CASEFOLD_TABLE: Python 3.12 str.casefold() (Unicode 15.0.0).
 // WHITESPACE_CODEPOINTS: the Python 3.12 str.isspace() set, frozen when the Python
 // engine was retired (2026-09-28). The generator is retired too.

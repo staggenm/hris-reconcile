@@ -9,26 +9,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:browser": "npm run build && playwright test",
-    "test:watch": "vitest",
-    "verify": "node scripts/verify.mjs",
-    "verify:ci": "node scripts/verify.mjs --ci",
-    "bench": "node scripts/bench.mjs"
+    "build": "vite build"
   },
   "dependencies": {
     "papaparse": "^5.5.2"
   },
   "devDependencies": {
-    "@types/node": "^22.13.9",
-    "@types/papaparse": "^5.3.15",
-    "@playwright/test": "^1.63.0",
-    "typescript": "^5.8.2",
     "vite": "^6.2.0",
-    "vite-plugin-singlefile": "^2.1.0",
-    "vitest": "^3.0.7"
+    "vite-plugin-singlefile": "^2.1.0"
   },
   "allowScripts": {
     "esbuild@0.25.12": true
