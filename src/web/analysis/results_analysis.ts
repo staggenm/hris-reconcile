@@ -1,12 +1,11 @@
 import {
-  FieldComparisonResult,
   FieldComparisonStatus,
   IdentityStatus,
   ReconciliationResult,
 } from "../core/types";
 import { compareCodePoints, compareNullableCodePoints } from "../core/compare";
 
-import { DISCREPANCY_STATUSES, FIELD_STATUSES, IDENTITY_PUBLIC, isDiscrepancy } from "../core/status";
+import { DISCREPANCY_STATUSES, FIELD_STATUSES, isDiscrepancy } from "../core/status";
 
 export { DISCREPANCY_STATUSES, isDiscrepancy };
 
@@ -117,30 +116,6 @@ export function aggregateMismatchesByPair(
   return summaries;
 }
 
-export function mismatchDetails(
-  result: ReconciliationResult,
-  options: {
-    fieldName: string;
-    leftValue?: string | null;
-    rightValue?: string | null;
-    filterLeft?: boolean;
-    filterRight?: boolean;
-  },
-): FieldComparisonResult[] {
-  return result.discrepancies.filter((item) => {
-    if (item.fieldName !== options.fieldName) {
-      return false;
-    }
-    if (options.filterLeft && item.leftRawValue !== (options.leftValue ?? null)) {
-      return false;
-    }
-    if (options.filterRight && item.rightRawValue !== (options.rightValue ?? null)) {
-      return false;
-    }
-    return true;
-  });
-}
-
 export interface ResultsMetrics {
   matched_employees: number;
   missing_left: number;
@@ -231,54 +206,5 @@ export function computeResultsSummary(result: ReconciliationResult): ResultsSumm
       field_discrepancies: fieldDiscrepancies,
       unmapped_values: fieldCounts.unmapped_left + fieldCounts.unmapped_right,
     },
-  };
-}
-
-export interface ResultPage<T> {
-  rows: T[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-// Matching comparisons are not stored; a page is recomputed by iterating the
-// lazy comparison sequence and keeping only the requested window.
-export function matchingDetailsPage(
-  result: ReconciliationResult,
-  options: { page: number; pageSize: number },
-): ResultPage<FieldComparisonResult> {
-  const start = options.page * options.pageSize;
-  const end = start + options.pageSize;
-  const rows: FieldComparisonResult[] = [];
-  let total = 0;
-  for (const item of result.fieldResults()) {
-    if (isDiscrepancy(item)) continue;
-    if (total >= start && total < end) rows.push(item);
-    total++;
-  }
-  return { rows, total, page: options.page, pageSize: options.pageSize };
-}
-
-export interface IdentityIssue {
-  identity: string | null;
-  status: string;
-  left_rows: number[];
-  right_rows: number[];
-}
-
-// Every identity result except MATCHED, with public status names and source rows.
-export function identityIssuesPage(
-  result: ReconciliationResult,
-  options: { page: number; pageSize: number },
-): ResultPage<IdentityIssue> {
-  const issues = result.identityResults.filter((item) => item.status !== "matched");
-  const start = options.page * options.pageSize;
-  return {
-    rows: issues.slice(start, start + options.pageSize).map((item) => ({
-      identity: item.identity, status: IDENTITY_PUBLIC[item.status], left_rows: item.leftLines, right_rows: item.rightLines,
-    })),
-    total: issues.length,
-    page: options.page,
-    pageSize: options.pageSize,
   };
 }

@@ -1,44 +1,26 @@
-import { ResultsSummary } from "../analysis/results_analysis";
+import type { RowCounts, RowFilter } from "../analysis/result_rows";
+import { ROW_STATUS } from "./labels";
 
-export type Tone = "ok" | "bad" | "warn" | "neutral";
+export type Tone = "ok" | "diff" | "a" | "b" | "warn";
 
-// How a metric's value is judged:
-// - problem: any occurrence is bad, none is ok (missing, duplicates, discrepancies);
-// - warning: any occurrence needs attention, none is ok (unmapped values, missing identities);
-// - good: some is ok, none is bad (matched employees);
-// - bonus: some is ok, none is neutral (field matches);
-// - count: always neutral (record counts).
-export type MetricKind = "problem" | "warning" | "good" | "bonus" | "count";
-
-export function toneFor(kind: MetricKind, value: number): Tone {
-  switch (kind) {
-    case "problem": return value > 0 ? "bad" : "ok";
-    case "warning": return value > 0 ? "warn" : "ok";
-    case "good": return value > 0 ? "ok" : "bad";
-    case "bonus": return value > 0 ? "ok" : "neutral";
-    case "count": return "neutral";
-  }
-}
-
-export interface MetricTile {
+// KPI tiles double as the table filters.
+export interface KpiTile {
+  filter: RowFilter;
+  icon: string;
   label: string;
   value: number;
   tone: Tone;
 }
 
-export function metricTiles(summary: ResultsSummary): MetricTile[] {
-  const { metrics, datasets } = summary;
-  const tiles: Array<[string, number, MetricKind]> = [
-    [`${datasets.left.name} records`, datasets.left.record_count, "count"],
-    [`${datasets.right.name} records`, datasets.right.record_count, "count"],
-    ["Matched employees", metrics.matched_employees, "good"],
-    ["Missing in Dataset A", metrics.missing_left, "problem"],
-    ["Missing in Dataset B", metrics.missing_right, "problem"],
-    ["Duplicate identities", metrics.duplicate_identities, "problem"],
-    ["Missing identity values", metrics.missing_identities, "warning"],
-    ["Field matches", metrics.field_matches, "bonus"],
-    ["Field discrepancies", metrics.field_discrepancies, "problem"],
-    ["Unmapped values", metrics.unmapped_values, "warning"],
+export function kpiTiles(counts: RowCounts, names: { a: string; b: string }): KpiTile[] {
+  const tiles: KpiTile[] = [
+    { filter: "match", icon: ROW_STATUS.match.icon, label: "Matched", value: counts.match, tone: "ok" },
+    { filter: "differs", icon: ROW_STATUS.differs.icon, label: "Differ", value: counts.differs, tone: "diff" },
+    { filter: "only_a", icon: "A", label: `Only in ${names.a}`, value: counts.only_a, tone: "a" },
+    { filter: "only_b", icon: "B", label: `Only in ${names.b}`, value: counts.only_b, tone: "b" },
   ];
-  return tiles.map(([label, value, kind]) => ({ label, value, tone: toneFor(kind, value) }));
+  const warnings = counts.duplicate + counts.blank_key;
+  // The warnings tile appears only when there is something to warn about.
+  if (warnings > 0) tiles.push({ filter: "warnings", icon: "!", label: "Duplicate or blank keys", value: warnings, tone: "warn" });
+  return tiles;
 }

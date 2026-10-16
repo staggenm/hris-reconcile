@@ -6,6 +6,12 @@ import { analysisOf, DatasetAnalysis } from "./dataset_analysis";
 import { ColumnProfile } from "./profiling";
 
 const FIELD_ALIASES = new Map<string, number>([
+  ...[
+    ["gender", "sex"], ["salary", "pay"], ["annualsalary", "grosspay"], ["salary", "grosspay"], ["department", "dept"],
+    ["hiredate", "startdate"], ["dateofbirth", "birthdate"], ["dob", "dateofbirth"], ["jobtitle", "position"],
+    ["manager", "supervisor"], ["costcenter", "costcentre"], ["employeeid", "personid"], ["employeeid", "personnelnumber"],
+    ["terminationdate", "enddate"], ["fte", "fulltimeequivalent"],
+  ].flatMap(([a, b]): Array<[string, number]> => [[`${a}|${b}`, 0.85], [`${b}|${a}`, 0.85]]),
   ["firstname|givenname", 0.92],
   ["givenname|firstname", 0.92],
   ["lastname|surname", 0.92],

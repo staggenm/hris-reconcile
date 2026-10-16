@@ -46,18 +46,48 @@ export function inputFromValue(value: string | null): string {
   return value ?? "";
 }
 
+// Accepted rows that share a value on either side describe one group of
+// equivalent values ("Mgr" = "Manager" = "MGR"), so they are merged before the
+// contract is built and a 1:N or N:1 translation never conflicts. The group
+// keeps its rows' canonical name when they agree, else takes its first B value.
 export function selectionsFromRows(fieldLabel: string, rows: MappingEditorRow[]): ValueMappingSelection[] {
   const accepted = rows.filter((row) => row.accepted);
   if (accepted.length === 0) {
-    throw new AppError("MAPPING_INCOMPLETE", `confirm at least one value mapping for '${fieldLabel}'`);
+    throw new AppError("MAPPING_INCOMPLETE", `tick at least one translation for '${fieldLabel}', or compare it another way`);
   }
-  return accepted.map((row) => {
+  for (const row of accepted) {
     if (row.left === null || row.right === null) {
-      throw new AppError("MAPPING_INCOMPLETE", `accepted mappings for '${fieldLabel}' require a value on both sides`);
+      throw new AppError("MAPPING_INCOMPLETE", `every ticked translation for '${fieldLabel}' needs a value on both sides`);
     }
-    if (!row.canonical.trim()) {
-      throw new AppError("MAPPING_INCOMPLETE", `accepted mappings for '${fieldLabel}' require a canonical value`);
-    }
-    return { canonical_value: row.canonical, left_values: [row.left], right_values: [row.right] };
+  }
+  const parent = accepted.map((_, index) => index);
+  const root = (index: number): number => (parent[index] === index ? index : (parent[index] = root(parent[index])));
+  for (const side of ["left", "right"] as const) {
+    const firstWith = new Map<string, number>();
+    accepted.forEach((row, index) => {
+      const prior = firstWith.get(row[side]!);
+      if (prior === undefined) firstWith.set(row[side]!, index);
+      else parent[root(index)] = root(prior);
+    });
+  }
+  const groups = new Map<number, MappingEditorRow[]>();
+  accepted.forEach((row, index) => {
+    const group = groups.get(root(index));
+    if (group) group.push(row);
+    else groups.set(root(index), [row]);
+  });
+  const usedCanonicals = new Set<string>();
+  return Array.from(groups.values(), (group) => {
+    const named = group[0].canonical.trim() !== "" && group.every((row) => row.canonical === group[0].canonical);
+    const base = named ? group[0].canonical : group[0].right!;
+    // Two groups must never share a canonical name, or they would merge.
+    let canonical = base;
+    for (let suffix = 2; usedCanonicals.has(canonical); suffix++) canonical = `${base} (${suffix})`;
+    usedCanonicals.add(canonical);
+    return {
+      canonical_value: canonical,
+      left_values: [...new Set(group.map((row) => row.left!))],
+      right_values: [...new Set(group.map((row) => row.right!))],
+    };
   });
 }

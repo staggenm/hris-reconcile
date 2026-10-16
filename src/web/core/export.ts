@@ -49,7 +49,7 @@ export function excelSafeCell(value: string): string {
   return FORMULA_TRIGGER.test(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
 }
 
-function escapeCsvCell(value: string | null | undefined, excelSafe = false): string {
+export function escapeCsvCell(value: string | null | undefined, excelSafe = false): string {
   if (value === null || value === undefined) {
     return "";
   }
@@ -69,7 +69,7 @@ function escapeCsvCell(value: string | null | undefined, excelSafe = false): str
 // assembled into a Blob, so no report-sized string is ever built.
 export const CHUNK_CHARS = 64 * 1024;
 
-function* batched(pieces: Iterable<string>): Generator<string> {
+export function* batched(pieces: Iterable<string>): Generator<string> {
   let buffer: string[] = [];
   let size = 0;
   for (const piece of pieces) {

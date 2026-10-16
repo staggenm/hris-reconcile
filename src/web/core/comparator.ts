@@ -1,5 +1,6 @@
 import { AppError } from "./errors";
 import { normalize } from "./normalization";
+import { absCanonicalAtMost, isCanonicalNumber, subtractCanonical } from "./numbers";
 import { MappingResolver, normalizedResolver, validateMapping } from "./mapping";
 import {
   FieldComparisonResult,
@@ -76,7 +77,7 @@ export function compareFieldWithResolver(
     } else {
       status = "mismatch";
     }
-  } else if (leftNormalized === rightNormalized) {
+  } else if (leftNormalized === rightNormalized || withinTolerance(leftNormalized, rightNormalized, field.tolerance)) {
     status = "match_normalized";
   } else {
     status = "mismatch";
@@ -96,4 +97,10 @@ export function compareFieldWithResolver(
     leftLine: options.leftLine ?? 0,
     rightLine: options.rightLine ?? 0,
   };
+}
+
+// Number fields with a tolerance: canonical numbers at most `tolerance` apart match.
+function withinTolerance(left: string | null, right: string | null, tolerance: number | undefined): boolean {
+  if (!tolerance || left === null || right === null || !isCanonicalNumber(left) || !isCanonicalNumber(right)) return false;
+  return absCanonicalAtMost(subtractCanonical(left, right), tolerance);
 }

@@ -1,6 +1,8 @@
 import { AppError } from "./errors";
 import { NormalizerName } from "./types";
 import { CASEFOLD_TABLE, WHITESPACE_CODEPOINTS } from "./unicode_casefold";
+import { parseNumber } from "./numbers";
+import { parseDate } from "./dates";
 
 export type Normalizer = (value: string) => string;
 
@@ -40,6 +42,18 @@ export function collapseWhitespace(value: string): string {
   return replaceWhitespace(value, " ").replace(/ +/g, " ");
 }
 
+// Number and date normalizers reduce recognized values to a canonical form;
+// anything else falls back to the normalized-text form, so "N/A" still
+// matches "n/a".
+function looseText(value: string): string {
+  return casefold(collapseWhitespace(trim(nfc(value))));
+}
+
+export const numberDecimalPoint: Normalizer = (value) => parseNumber(value, ".") ?? looseText(value);
+export const numberDecimalComma: Normalizer = (value) => parseNumber(value, ",") ?? looseText(value);
+export const dateDayFirst: Normalizer = (value) => parseDate(value, "dmy") ?? looseText(value);
+export const dateMonthFirst: Normalizer = (value) => parseDate(value, "mdy") ?? looseText(value);
+
 const CASEFOLD = new Map(Object.entries(CASEFOLD_TABLE));
 
 // Whitespace set pinned in unicode_casefold.ts (origin documented there).
@@ -77,6 +91,10 @@ export const NORMALIZERS = new NormalizerRegistry({
   casefold,
   collapse_whitespace: collapseWhitespace,
   strip_leading_zeros: stripLeadingZeros,
+  number: numberDecimalPoint,
+  number_decimal_comma: numberDecimalComma,
+  date_dmy: dateDayFirst,
+  date_mdy: dateMonthFirst,
 });
 
 export function normalize(

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; img-src data:; child-src 'none'; frame-src 'none';">
-  <title>HRIS Reconciliation</title>
+  <title>HRIS Reconcile</title>
   <!-- source-only-guard: removed from production builds by vite.config.ts -->
   <style>html.source-only body > *{display:none!important}html.source-only #source-notice{display:block!important;position:fixed;inset:0;background:#f5f7fb;color:#17243a;padding:3rem;font:16px/1.5 system-ui,sans-serif}html.source-only #source-notice h1{font-size:1.7rem}</style>
   <script>
@@ -31,130 +31,134 @@
   <link rel="stylesheet" href="./app.css">
 </head>
 <body>
-  <header class="topbar header">
-    <div>
-      <p class="eyebrow">Private in-browser workbench</p>
-      <h1>HRIS Reconciliation</h1>
-      <p>Discover why two HR datasets disagree.</p>
+  <header class="appbar">
+    <div class="appbar-inner">
+      <div class="brand">
+        <h1>Reconcile two files</h1>
+        <span class="brand-sub">HRIS Reconcile</span>
+      </div>
+      <div class="appbar-actions">
+        <button id="start-over" class="ghost" type="button">Start over</button>
+        <div class="menu" id="export-menu">
+          <button id="export-toggle" class="secondary" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="export-panel" disabled title="Compare the files first">Export<span class="caret" aria-hidden="true"></span></button>
+          <div id="export-panel" class="menu-panel" hidden>
+            <p class="menu-label">For people</p>
+            <button type="button" class="menu-item" data-export="differences.csv"><strong>Differences only</strong><span>CSV for Excel: one line per difference</span></button>
+            <button type="button" class="menu-item" data-export="comparison.csv"><strong>Full comparison</strong><span>CSV for Excel: every row, A and B side by side</span></button>
+            <button type="button" class="menu-item" data-export="report.html"><strong>Printable report</strong><span>Summary and differences, ready to print or share</span></button>
+            <button type="button" class="menu-item" data-action="copy-summary"><strong>Copy summary</strong><span>A short text summary for an email or chat</span></button>
+            <p class="menu-label">For audits</p>
+            <button type="button" class="menu-item" data-export="report.json"><strong>Audit report (JSON)</strong><span>Settings, file fingerprints and every difference</span></button>
+            <button type="button" class="menu-item" data-export="full.csv"><strong>Raw results (CSV)</strong><span>Machine-readable, every comparison</span></button>
+            <button type="button" class="menu-item" data-export="mismatches.csv"><strong>Raw differences (CSV)</strong><span>Machine-readable, differences only</span></button>
+            <label class="menu-check"><input id="excel-safe" type="checkbox" checked>Protect CSV cells from spreadsheet formulas</label>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="actions">
-      <button id="clear-session" class="secondary">Clear session / start over</button>
-      <button id="quit-application" class="secondary danger">Close workbench</button>
-    </div>
+    <div id="progress" class="progress" hidden><span class="progress-bar" role="progressbar" aria-label="Working"></span></div>
+    <p id="progress-text" class="progress-text" role="status" aria-live="polite"></p>
   </header>
+
   <main>
-    <div class="notice banner banner-info" role="note">Processing runs locally in this browser. The application makes no network requests.</div>
-    <div id="error" class="message error hidden" role="alert"></div>
-    <div id="busy" class="busy hidden" role="status" aria-live="polite"><span class="busy-bar" role="progressbar" aria-label="Working"></span><span id="busy-label"></span></div>
-
-    <section id="step-upload" class="step" aria-labelledby="step-upload-title">
-      <div class="step-number">1</div>
-      <div class="step-body">
-        <h2 id="step-upload-title" tabindex="-1">Upload datasets</h2>
-        <p>Choose or drop two CSV exports to compare. Only the first five rows are previewed.</p>
-        <div class="two-column">
-          <div id="left-card" class="dataset-card">
-            <h3>Dataset A</h3>
-            <label class="file-picker">Choose CSV<input id="left-file" type="file" accept=".csv,text/csv"></label>
-            <label class="encoding-picker">Encoding<select id="left-encoding"><option value="utf-8" selected>UTF-8</option><option value="windows-1252">Windows-1252</option></select></label>
-            <div id="left-dataset"></div>
+    <section id="step-load" class="step" aria-labelledby="step-load-title">
+      <div class="step-head"><span class="step-num" aria-hidden="true">1</span><h2 id="step-load-title" tabindex="-1">Load files</h2></div>
+      <p class="helper">Choose the two CSV files to compare, for example an HR export and a payroll export.</p>
+      <div id="load-messages" class="messages"></div>
+      <div class="dropzones">
+        <div id="drop-left" class="dropzone" data-side="a">
+          <span class="file-chip a">File A</span>
+          <div class="dz-empty" role="button" tabindex="0" aria-label="Choose File A">
+            <span class="dz-icon" aria-hidden="true"></span>
+            <span>Drop a CSV file here, or <span class="link">browse</span></span>
           </div>
-          <div id="right-card" class="dataset-card">
-            <h3>Dataset B</h3>
-            <label class="file-picker">Choose CSV<input id="right-file" type="file" accept=".csv,text/csv"></label>
-            <label class="encoding-picker">Encoding<select id="right-encoding"><option value="utf-8" selected>UTF-8</option><option value="windows-1252">Windows-1252</option></select></label>
-            <div id="right-dataset"></div>
+          <div class="dz-loaded" hidden></div>
+          <input id="left-file" class="sr-only" type="file" accept=".csv,text/csv" tabindex="-1">
+        </div>
+        <div id="drop-right" class="dropzone" data-side="b">
+          <span class="file-chip b">File B</span>
+          <div class="dz-empty" role="button" tabindex="0" aria-label="Choose File B">
+            <span class="dz-icon" aria-hidden="true"></span>
+            <span>Drop a CSV file here, or <span class="link">browse</span></span>
+          </div>
+          <div class="dz-loaded" hidden></div>
+          <input id="right-file" class="sr-only" type="file" accept=".csv,text/csv" tabindex="-1">
+        </div>
+      </div>
+    </section>
+
+    <section id="step-settings" class="step" aria-labelledby="step-settings-title">
+      <div class="step-head"><span class="step-num" aria-hidden="true">2</span><h2 id="step-settings-title" tabindex="-1">Match settings</h2></div>
+      <p class="locked-note">Load both files to continue.</p>
+      <div class="step-content">
+        <div id="settings-messages" class="messages"></div>
+        <div id="imported-summary" class="imported" hidden></div>
+        <div id="wizard">
+          <div class="block">
+            <h3>Match rows on</h3>
+            <p class="helper">The column that identifies the same person or record in both files, such as an employee ID.</p>
+            <div class="key-row">
+              <label class="field"><span class="field-label"><span class="dot a" aria-hidden="true"></span>Column in File A</span><select id="key-left"></select></label>
+              <span class="key-eq" aria-hidden="true">=</span>
+              <label class="field"><span class="field-label"><span class="dot b" aria-hidden="true"></span>Column in File B</span><select id="key-right"></select></label>
+            </div>
+            <div id="key-evidence" class="evidence"></div>
+            <details id="key-options" class="disclosure">
+              <summary>Matching options</summary>
+              <fieldset class="checks">
+                <legend class="sr-only">How keys are matched</legend>
+                <label><input type="checkbox" value="trim">Ignore spaces around keys</label>
+                <label><input type="checkbox" value="strip_leading_zeros">Ignore leading zeros (00123 = 123)</label>
+                <label><input type="checkbox" value="casefold">Ignore capitals (ab12 = AB12)</label>
+              </fieldset>
+            </details>
+          </div>
+          <div class="block">
+            <div class="block-head">
+              <h3>Columns to compare</h3>
+              <span class="toggle-all">Select <button id="select-all" class="link" type="button">all</button> · <button id="select-none" class="link" type="button">none</button></span>
+            </div>
+            <p class="helper">Columns are paired, and each one compared in the way that fits its data. Change anything that looks wrong.</p>
+            <div id="column-list" class="column-list" role="list"></div>
+            <div id="unpaired" class="unpaired"></div>
+            <button id="add-pair" class="secondary small" type="button">Add a column pair</button>
           </div>
         </div>
-      </div>
-    </section>
-
-    <section id="step-identity" class="step hidden" aria-labelledby="step-identity-title">
-      <div class="step-number">2</div>
-      <div class="step-body">
-        <h2 id="step-identity-title" tabindex="-1">Match employees</h2>
-        <p>Which fields identify the same employee in both datasets?</p>
-        <div id="identity-suggestion" class="message"></div>
-        <div class="identity-grid">
-          <label>Dataset A identity<select id="left-identity"></select></label>
-          <span class="arrow">↔</span>
-          <label>Dataset B identity<select id="right-identity"></select></label>
-        </div>
-        <fieldset id="identity-normalizers" class="identity-normalizers">
-          <legend>Identity normalization (optional, applied to both sides; matching is exact by default)</legend>
-          <label><input type="checkbox" value="trim">Trim whitespace</label>
-          <label><input type="checkbox" value="strip_leading_zeros">Strip leading zeros</label>
-          <label><input type="checkbox" value="casefold">Ignore case</label>
-        </fieldset>
-        <p id="identity-evidence" class="caption"></p>
-        <div id="contract-summary" class="contract-summary hidden"></div>
-        <div class="actions">
-          <label class="file-picker secondary">Load saved contract<input id="contract-file" type="file" accept=".json,application/json"></label>
-          <button id="confirm-identity">Confirm employee identity</button>
-          <span id="identity-confirmed" class="success hidden" role="status" aria-live="polite">Employee identity fields confirmed.</span>
+        <div class="step-actions">
+          <button id="compare" class="primary" type="button">Compare files</button>
+          <span id="compare-summary" class="helper"></span>
+          <span class="spacer"></span>
+          <button id="save-settings" class="ghost" type="button">Save settings</button>
+          <label class="ghost file-button">Load saved settings<input id="settings-file" class="sr-only" type="file" accept=".json,application/json"></label>
         </div>
       </div>
     </section>
 
-    <section id="step-fields" class="step hidden" aria-labelledby="step-fields-title">
-      <div class="step-number">3</div>
-      <div class="step-body">
-        <h2 id="step-fields-title" tabindex="-1">Match fields</h2>
-        <p>Suggestions are advisory. Exact comparison is the default.</p>
-        <div class="table-scroll"><table><caption class="sr-only">Field matches between Dataset A and Dataset B</caption><thead><tr><th scope="col">Dataset A field</th><th scope="col">Dataset B field</th><th scope="col">Mode</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="field-rows"></tbody></table></div>
-        <div class="actions"><button id="add-field" class="secondary">Add row</button><button id="confirm-fields">Confirm field mappings</button></div>
-        <span id="fields-confirmed" class="success hidden" role="status" aria-live="polite">Field mappings confirmed.</span>
-      </div>
-    </section>
-
-    <section id="step-mappings" class="step hidden" aria-labelledby="step-mappings-title">
-      <div class="step-number">4</div>
-      <div class="step-body">
-        <h2 id="step-mappings-title" tabindex="-1">Review value mappings</h2>
-        <p>Observed pairs are advisory. Accept only representation differences you confirm as semantically equivalent.</p>
-        <div id="mapping-editors"></div>
-        <button id="confirm-mappings">Confirm accepted semantic mappings</button>
-        <span id="mappings-confirmed" class="success hidden" role="status" aria-live="polite">Value mapping review complete.</span>
-      </div>
-    </section>
-
-    <section id="step-run" class="step hidden" aria-labelledby="step-run-title">
-      <div class="step-number">5</div>
-      <div class="step-body">
-        <h2 id="step-run-title" tabindex="-1">Run comparison</h2>
-        <label>Reconciliation name<input id="contract-name" type="text"></label>
-        <p id="run-summary" class="caption"></p>
-        <div class="actions"><button id="run-reconciliation">Run reconciliation</button><button id="save-contract" class="secondary">Save contract (JSON)</button></div>
-      </div>
-    </section>
-
-    <section id="step-results" class="step hidden" aria-labelledby="step-results-title">
-      <div class="step-number">6</div>
-      <div class="step-body">
-        <h2 id="step-results-title" tabindex="-1">Explore discrepancies</h2>
-        <div id="metrics" class="metrics"></div>
-        <h3>Identity issues</h3>
-        <div id="identity-issues"></div>
-        <h3>Mismatch analysis by field</h3>
-        <div id="field-summary"></div>
-        <div id="pair-panel" class="hidden">
-          <label>Inspect mismatch patterns for field<select id="result-field"></select></label>
-          <div id="pair-summary"></div>
-          <label>Employee drill-down<select id="result-pair"></select></label>
-          <div id="detail-summary"></div>
+    <section id="step-results" class="step" aria-labelledby="step-results-title">
+      <div class="step-head"><span class="step-num" aria-hidden="true">3</span><h2 id="step-results-title" tabindex="-1">Results</h2></div>
+      <p class="locked-note">Compare the files to see the results here.</p>
+      <div class="step-content">
+        <div id="results-messages" class="messages"></div>
+        <p id="verdict" class="verdict"></p>
+        <div id="kpis" class="kpis" role="group" aria-label="Show rows"></div>
+        <div id="hints" class="messages"></div>
+        <details id="by-column" class="disclosure" open>
+          <summary>Differences by column</summary>
+          <div id="column-summary"></div>
+        </details>
+        <div class="table-toolbar">
+          <label class="search"><span class="sr-only">Search keys and values</span><input id="search" type="search" placeholder="Search keys and values" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
+          <div id="active-filters" class="chips"></div>
+          <span id="row-count" class="helper"></span>
         </div>
-        <details id="matching-details" class="finding"><summary>Optional matching comparison details</summary><div id="matching-summary" class="finding-body"></div></details>
-        <h3>Download local results</h3>
-        <p class="caption export-note">Exports may contain sensitive HR data.</p>
-        <div class="actions">
-          <button class="download secondary" data-file="full.csv">Full results CSV</button>
-          <button class="download secondary" data-file="mismatches.csv">Mismatches only CSV</button>
-          <button class="download secondary" data-file="report.json">JSON report</button>
-        </div>
-        <label class="inline-check"><input id="excel-safe" type="checkbox" checked>Neutralize spreadsheet formulas in CSV exports</label>
+        <div id="results-table" class="table-card"></div>
+        <div id="pager" class="pager"></div>
       </div>
     </section>
   </main>
+
+  <footer class="privacy">Files are processed in your browser and never uploaded. <span id="app-version"></span></footer>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script type="module" src="./main.ts"></script>
 </body>
 </html>

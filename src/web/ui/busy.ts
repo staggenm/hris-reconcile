@@ -1,20 +1,19 @@
 // Progress labels for pending worker operations. The newest pending request
 // names the work the user is waiting for.
 export const BUSY_LABELS = {
-  parse: "Reading and profiling the file…",
-  "suggest-identity": "Suggesting employee identity fields…",
-  "score-identity": "Checking identity overlap…",
-  "mapping-evidence": "Collecting value-mapping evidence…",
-  reconcile: "Reconciling…",
+  parse: "Reading the file…",
+  "suggest-identity": "Looking for the key column…",
+  "identity-options": "Checking how the keys line up…",
+  "suggest-fields": "Pairing columns…",
+  "suggest-modes": "Working out how to compare each column…",
+  "mapping-evidence": "Collecting the values to translate…",
+  "build-contract": "Checking the settings…",
+  reconcile: "Comparing the files…",
+  "result-rows": "Loading rows…",
+  pairs: "Loading the most common differences…",
   export: "Preparing the download…",
-  pairs: "Loading results…",
-  details: "Loading results…",
-  "matching-details": "Loading results…",
-  "identity-issues": "Loading results…",
-  "suggest-fields": "Suggesting field matches…",
-  "build-contract": "Checking the configuration…",
-  "import-contract": "Checking the contract…",
-  "serialize-contract": "Preparing the contract…",
+  "import-contract": "Reading the saved settings…",
+  "serialize-contract": "Preparing the settings file…",
 } as const;
 
 export function busyLabel(pendingTypes: readonly string[]): string | null {

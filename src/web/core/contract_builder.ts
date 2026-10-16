@@ -7,6 +7,7 @@ import {
   MappingConfig,
   NormalizerName,
   ReconciliationContract,
+  ValueFormat,
 } from "./types";
 import { casefold } from "./normalization";
 import { validateMapping } from "./mapping";
@@ -28,6 +29,10 @@ export interface FieldSelection {
   left_column: string;
   right_column: string;
   mode: ComparisonMode;
+  // Number: decimal_point (default) or decimal_comma; Date: dmy (default) or mdy.
+  format?: ValueFormat;
+  // Number only: the largest difference still counted as a match.
+  tolerance?: number;
   value_mappings?: ValueMappingSelection[];
 }
 
@@ -47,6 +52,16 @@ export const NORMALIZED_TEXT_CHAIN: NormalizerName[] = [
   "collapse_whitespace",
   "casefold",
 ];
+
+// The normalizer chain of each wizard mode.
+export function modeNormalizers(mode: ComparisonMode, format?: ValueFormat): NormalizerName[] {
+  switch (mode) {
+    case "Normalized text": return [...NORMALIZED_TEXT_CHAIN];
+    case "Number": return [format === "decimal_comma" ? "number_decimal_comma" : "number"];
+    case "Date": return [format === "mdy" ? "date_mdy" : "date_dmy"];
+    default: return [];
+  }
+}
 
 function mappingName(index: number, fieldName: string): string {
   const slug = casefold(fieldName).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
@@ -160,15 +175,18 @@ export function buildContract(configuration: WizardConfiguration): Reconciliatio
       valueMappings[mapName] = buildMapping(field);
     }
 
-    const normalizers =
-      field.mode === "Normalized text" ? [...NORMALIZED_TEXT_CHAIN] : [];
+    const tolerance = field.mode === "Number" && field.tolerance ? field.tolerance : undefined;
+    if (tolerance !== undefined && !(Number.isFinite(tolerance) && tolerance > 0)) {
+      throw new WizardConfigurationError("CONTRACT_INVALID", `the allowed difference for '${field.left_column}' must be a positive number`);
+    }
 
     configuredFields.push({
       name: field.left_column,
       left: field.left_column,
       right: field.right_column,
-      normalize: normalizers,
+      normalize: modeNormalizers(field.mode, field.format),
       valueMapping: mapName,
+      ...(tolerance !== undefined ? { tolerance } : {}),
     });
   }
 

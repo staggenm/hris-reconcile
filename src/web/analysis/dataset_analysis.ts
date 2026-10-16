@@ -1,4 +1,4 @@
-import { casefold } from "../core/normalization";
+import { casefold, stripLeadingZeros } from "../core/normalization";
 import { Dataset } from "../core/types";
 import { ColumnProfile, profileColumn } from "./profiling";
 
@@ -25,7 +25,8 @@ export class DatasetAnalysis {
     return profile;
   }
 
-  // Trimmed, casefolded, non-blank values: the conservative identity overlap basis.
+  // Trimmed, casefolded, non-blank values without leading zeros: the overlap
+  // basis for finding key columns ("00101" in one file is "101" in the other).
   normalizedValues(column: string): Set<string> {
     let values = this.valueCache.get(column);
     if (!values) {
@@ -44,7 +45,7 @@ export class DatasetAnalysis {
     for (const record of this.dataset.records) {
       const value = record[column];
       if (value !== null && value !== undefined && value.trim() !== "") {
-        result.add(casefold(value.trim()));
+        result.add(stripLeadingZeros(casefold(value.trim())));
       }
     }
     return result;

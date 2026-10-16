@@ -1,1027 +1,1239 @@
 import { AppError, errorCodeOf } from "./core/errors";
 import { checkFileSize } from "./core/limits";
+import { APP_VERSION } from "./core/version";
 // Type-only imports from analysis/ and core/ modules keep their code (the
 // normalizers, the casefold table, contract parsing) in the worker bundle.
 import type { CsvEncoding } from "./analysis/csv";
 import type { ColumnProfile } from "./analysis/profiling";
-import type { FieldSuggestion, IdentityCandidate } from "./analysis/suggestions";
+import type { IdentityCandidate } from "./analysis/suggestions";
+import type { FieldPairSuggestion, IdentityOptionsSuggestion, ModeSuggestion } from "./analysis/smart_defaults";
 import type { ObservedPair } from "./analysis/mapping_analysis";
-import type {
-  IdentityIssue,
-  PairMismatchSummary,
-  ResultsSummary,
-  FieldMismatchSummary,
-} from "./analysis/results_analysis";
+import type { PairMismatchSummary } from "./analysis/results_analysis";
+import type { FixHint, ResultRow, ResultRowsPage, RowFilter, RowQuery } from "./analysis/result_rows";
 import type { FieldSelection, WizardConfiguration } from "./core/contract_builder";
-import type { ImportedContract } from "./reconciliation.worker";
-import {
-  inputFromValue,
-  manualRow,
-  MappingEditorRow,
-  MISSING_LABEL,
-  rowsFromEvidence,
-  selectionsFromRows,
-  valueFromInput,
-} from "./ui/mapping_editor";
-import { busyLabel } from "./ui/busy";
-import { metricTiles } from "./ui/metrics";
+import type { ExportFormat, ImportedContract } from "./reconciliation.worker";
+import type { ComparisonMode, DatasetSummary, IdentityNormalizerName, ReconciliationContract, ValueFormat } from "./core/types";
 import type { ContractSummary } from "./ui/contract_summary";
-import { pairOptions, selectedPair } from "./ui/drilldown";
+import { manualRow, MappingEditorRow, rowsFromEvidence, selectionsFromRows } from "./ui/mapping_editor";
+import { busyLabel } from "./ui/busy";
+import { kpiTiles } from "./ui/metrics";
 import { debounce } from "./ui/debounce";
 import { assertCsvFile } from "./ui/files";
-import { confirmStep, EditKind, INITIAL_PROGRESS, invalidate, invalidationNote, Progress, reach, reachSkipping, STEP_IDS, StepId, stepStates } from "./ui/steps";
+import { LOCKED_NOTES, STEP_IDS, StepId, stepStates } from "./ui/steps";
+import { loadRemembered, pairKey, RememberedSettings, saveRemembered } from "./ui/storage";
+import { $, button, node, selectOf } from "./ui/dom";
+import { count, FRIENDLY_ERRORS, IDENTITY_OPTION_LABELS, MODE_CHOICES, modeAction, modeChoice, percent, plural, ROW_STATUS } from "./ui/labels";
 import { onBusyChange, onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
-import type {
-  ComparisonMode,
-  DatasetSummary,
-  FieldComparisonResult,
-  IdentityNormalizerName,
-  ReconciliationContract,
-} from "./core/types";
 
-interface MappingEditorState {
-  field: { left_column: string; right_column: string };
+type Side = "left" | "right";
+type Area = "load" | "settings" | "results";
+
+interface LoadedFile {
+  file: File;
+  summary: DatasetSummary;
+  profiles: ColumnProfile[];
+  encoding: CsvEncoding;
+  // The encoding was detected rather than chosen.
+  detected: boolean;
+}
+
+interface MappingState {
   rows: MappingEditorRow[];
+  loaded: boolean;
+  page: number;
 }
 
-interface AppState {
-  left: DatasetSummary | null;
-  right: DatasetSummary | null;
-  identity: { left_column: string; right_column: string; normalize: IdentityNormalizerName[] } | null;
-  fields: Array<{
-    left_column: string;
-    right_column: string;
-    mode: ComparisonMode;
-  }>;
-  pairs: MappingEditorState[];
-  contract: ReconciliationContract | null;
-  result: ReconciliationDashboard | null;
-  resultPairs: PairMismatchSummary[];
-  pairTotal: number;
+interface ColumnRow {
+  id: number;
+  include: boolean;
+  left_column: string;
+  right_column: string;
+  mode: ComparisonMode;
+  format?: ValueFormat;
+  tolerance?: number;
+  suggestion: ModeSuggestion | null;
+  // Why the columns were paired, when it is not obvious from their names.
+  pairReason: string | null;
+  remembered: boolean;
+  mapping: MappingState | null;
 }
 
-let sessionGeneration = 0;
+interface ViewState {
+  filter: RowFilter;
+  field: string | null;
+  pair: { left: string | null; right: string | null } | null;
+  search: string;
+  page: number;
+}
+
+interface RunState {
+  contract: ReconciliationContract;
+  dashboard: ReconciliationDashboard;
+}
+
+const PAGE_SIZE = 100;
+const MAPPING_PAGE_SIZE = 50;
+const DEFAULT_VIEW: ViewState = { filter: "issues", field: null, pair: null, search: "", page: 0 };
+
+const state = {
+  files: { left: null, right: null } as Record<Side, LoadedFile | null>,
+  key: { left: "", right: "", normalize: [] as IdentityNormalizerName[] },
+  keyStats: null as IdentityOptionsSuggestion | null,
+  // Options switched on automatically, and how many keys they won.
+  keyAuto: null as { options: IdentityNormalizerName[]; gained: number } | null,
+  columns: [] as ColumnRow[],
+  imported: null as { contract: ReconciliationContract; summary: ContractSummary; fileName: string } | null,
+  run: null as RunState | null,
+  stale: false,
+  view: { ...DEFAULT_VIEW } as ViewState,
+  patterns: new Map<string, PairMismatchSummary[]>(),
+  remembered: loadRemembered() as RememberedSettings,
+};
+
+// Generations guard every async step: a response for an older session,
+// upload or settings revision is dropped.
+let session = 0;
+let setupGeneration = 0;
 let runGeneration = 0;
-const uploadGeneration: Record<"left" | "right", number> = { left: 0, right: 0 };
-// The last chosen file per side, so changing the encoding can re-parse it.
-const chosenFiles: Record<"left" | "right", File | null> = { left: null, right: null };
+let rowsGeneration = 0;
+let nextColumnId = 1;
+const uploadGeneration: Record<Side, number> = { left: 0, right: 0 };
 const downloadUrls = new Set<string>();
-const mappingPages = new WeakMap<MappingEditorState, number>();
-let progress: Progress = INITIAL_PROGRESS;
 
-const state: AppState = {
-  left: null,
-  right: null,
-  identity: null,
-  fields: [],
-  pairs: [],
-  contract: null,
-  result: null,
-  resultPairs: [],
-  pairTotal: 0,
-};
+const sideName = (side: Side) => (side === "left" ? "A" : "B");
+const fileName = (side: Side) => state.files[side]?.summary.name ?? `File ${sideName(side)}`;
+const names = () => ({ a: fileName("left"), b: fileName("right") });
 
-const modes: ComparisonMode[] = [
-  "Exact",
-  "Normalized text",
-  "Value mapping",
-  "Ignore",
-];
+// ---------- Steps ----------
 
-const $ = <T extends HTMLElement = HTMLElement>(selector: string): T => {
-  const el = document.querySelector<T>(selector);
-  if (!el) throw new AppError("INTERNAL", `Element not found: ${selector}`);
-  return el;
-};
-
-function node<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  text = "",
-  className = "",
-): HTMLElementTagNameMap[K] {
-  const element = document.createElement(tag);
-  if (text !== "") element.textContent = text;
-  if (className) element.className = className;
-  return element;
-}
-
-function show(selector: string, visible = true): void {
-  $(selector).classList.toggle("hidden", !visible);
-}
-
-// Step visibility, data-state, reset notes, and the "confirmed" badges all
-// follow the step state machine.
-function setProgress(next: Progress): void {
-  progress = next;
-  const states = stepStates(progress);
+function updateSteps(): void {
+  const states = stepStates({ filesLoaded: Boolean(state.files.left && state.files.right), hasResults: state.run !== null, stale: state.stale });
   for (const step of STEP_IDS) {
     const section = $(`#step-${step}`);
-    section.classList.toggle("hidden", states[step] === "hidden");
-    if (states[step] === "hidden") delete section.dataset.state;
-    else section.dataset.state = states[step];
-    section.querySelector(".step-note")?.remove();
-    if (states[step] === "stale" && progress.stale) {
-      const note = node("p", invalidationNote(progress.stale), "step-note");
-      note.setAttribute("role", "status");
-      section.querySelector("h2")!.after(note);
-    }
+    section.dataset.state = states[step];
+    section.toggleAttribute("inert", states[step] === "locked");
+    const note = section.querySelector(".locked-note");
+    if (note) note.textContent = LOCKED_NOTES[step];
   }
-  show("#identity-confirmed", states.identity === "done");
-  show("#fields-confirmed", states.fields === "done");
-  show("#mappings-confirmed", states.mappings === "done");
+  const exportToggle = $<HTMLButtonElement>("#export-toggle");
+  exportToggle.disabled = state.run === null;
+  exportToggle.title = state.run ? "" : "Compare the files first";
 }
 
-function edit(kind: EditKind): void {
-  setProgress(invalidate(progress, kind).progress);
-}
-
-function showError(error: unknown): void {
-  // The banner is sticky, so it is visible wherever the user is; the page does not jump.
-  const target = $("#error");
-  const code = errorCodeOf(error);
-  const message = error instanceof Error ? error.message : String(error);
-  target.dataset.code = code;
-  const dismiss = node("button", "Dismiss", "error-dismiss secondary");
-  dismiss.type = "button";
-  dismiss.addEventListener("click", clearError);
-  target.replaceChildren(node("span", code, "error-code"), node("span", message, "error-message"), dismiss);
-  target.classList.remove("hidden");
-}
-
-// After a step is confirmed, keyboard and screen-reader focus moves to the next step's heading.
 function focusStep(step: StepId): void {
-  $(`#step-${step}-title`).focus();
+  const heading = $(`#step-${step}-title`);
+  heading.focus({ preventScroll: true });
+  heading.closest("section")!.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
 }
 
-function clearError(): void {
-  $("#error").classList.add("hidden");
+// ---------- Messages ----------
+
+interface MessageOptions {
+  tone: "info" | "ok" | "warn" | "error" | "accent";
+  title: string;
+  detail?: string;
+  actions?: HTMLElement[];
+  dismissible?: boolean;
+  id?: string;
 }
 
-function select(options: string[], value: string): HTMLSelectElement {
-  const element = node("select");
-  for (const optionValue of options) {
-    const option = node("option", optionValue);
-    option.value = optionValue;
-    option.selected = optionValue === value;
-    element.append(option);
+const MESSAGE_ICONS = { info: "i", ok: "✓", warn: "!", error: "✕", accent: "→" } as const;
+
+function messageElement(options: MessageOptions): HTMLDivElement {
+  const element = node("div", "", "message");
+  element.dataset.tone = options.tone;
+  if (options.id) element.dataset.id = options.id;
+  element.setAttribute("role", options.tone === "error" ? "alert" : "status");
+  const body = node("div", "", "message-body");
+  body.append(node("p", options.title));
+  if (options.detail) body.append(node("p", options.detail, "message-detail"));
+  if (options.actions?.length) {
+    const actions = node("div", "", "message-actions");
+    actions.append(...options.actions);
+    body.append(actions);
   }
+  element.append(node("span", MESSAGE_ICONS[options.tone], "message-icon"), body);
+  if (options.dismissible) element.append(button("Dismiss", "ghost dismiss", () => element.remove()));
   return element;
 }
 
-function display(value: unknown): string {
-  return value === null || value === undefined ? MISSING_LABEL : String(value);
+function showMessage(area: Area, options: MessageOptions): void {
+  const container = $(`#${area}-messages`);
+  if (options.id) container.querySelector(`[data-id="${options.id}"]`)?.remove();
+  container.append(messageElement(options));
 }
 
-interface TableColumn<T> {
-  label: string;
-  value: (row: T) => unknown;
+function clearMessages(area: Area, id?: string): void {
+  const container = $(`#${area}-messages`);
+  if (id) container.querySelector(`[data-id="${id}"]`)?.remove();
+  else container.replaceChildren();
 }
 
-function renderTable<T>(columns: TableColumn<T>[], rows: T[], caption: string): HTMLDivElement {
-  const wrapper = node("div", "", "table-scroll");
-  const table = node("table");
-  table.append(node("caption", caption, "sr-only"));
-  const header = node("tr");
-  for (const column of columns) {
-    const th = node("th", column.label);
-    th.scope = "col";
-    header.append(th);
-  }
-  const head = node("thead");
-  head.append(header);
-  const body = node("tbody");
-  for (const row of rows) {
-    const tr = node("tr");
-    for (const column of columns) tr.append(node("td", display(column.value(row))));
-    body.append(tr);
-  }
-  table.append(head, body);
-  wrapper.append(table);
-  return wrapper;
+function capitalize(text: string): string {
+  return text ? text[0].toUpperCase() + text.slice(1) : text;
 }
 
-function invalidateAfterUpload(): void {
-  runGeneration++;
-  state.identity = null;
-  state.fields = [];
-  state.pairs = [];
-  state.contract = null;
-  state.result = null;
-  state.resultPairs = [];
-  for (const selector of ["#identity-suggestion", "#identity-evidence", "#field-rows", "#mapping-editors", "#run-summary", "#metrics", "#identity-issues", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
-    $(selector).replaceChildren();
-  }
-  show("#pair-panel", false);
+function currentArea(): Area {
+  if (state.run) return "results";
+  return state.files.left && state.files.right ? "settings" : "load";
 }
 
-async function upload(side: "left" | "right", file: File, kind: EditKind = `${side}-file`): Promise<void> {
-  clearError();
-  // Checked before anything is reset, so a wrong drop never discards the session.
+// Errors appear inside the card they belong to, in plain words.
+function showError(error: unknown, area: Area = currentArea()): void {
+  const code = errorCodeOf(error);
+  const technical = error instanceof Error ? error.message : String(error);
+  const friendly = FRIENDLY_ERRORS[code];
+  const unexpected = code === "UNKNOWN" || code === "INTERNAL" || code === "WORKER_PROTOCOL";
+  showMessage(area, {
+    tone: "error",
+    title: friendly ?? (unexpected ? "Something went wrong. Start over and try again." : capitalize(technical)),
+    detail: friendly && !unexpected ? capitalize(technical) : undefined,
+    dismissible: true,
+    id: "error",
+  });
+  if (unexpected) console.error(error);
+  $(`#${area}-messages`).scrollIntoView({ block: "nearest" });
+}
+
+function toast(text: string): void {
+  const element = $("#toast");
+  element.textContent = text;
+  element.hidden = false;
+  window.clearTimeout(Number(element.dataset.timer));
+  element.dataset.timer = String(window.setTimeout(() => { element.hidden = true; }, 4000));
+}
+
+// ---------- Step 1: load files ----------
+
+async function upload(side: Side, file: File, encoding?: CsvEncoding): Promise<void> {
+  clearMessages("load");
   assertCsvFile(file.name, file.type);
-  chosenFiles[side] = file;
-  const session = sessionGeneration;
+  checkFileSize(file.name, file.size);
   const request = ++uploadGeneration[side];
-  edit(kind);
-  invalidateAfterUpload();
-  state[side] = null;
-  $(`#${side}-dataset`).replaceChildren();
+  const currentSession = session;
+  const isCurrent = () => currentSession === session && request === uploadGeneration[side];
+  resetSettings();
+  state.files[side] = null;
+  renderFile(side);
+  updateSteps();
+
+  const parse = async (chosen: CsvEncoding) => parseAndProfileInWorker({
+    content: await file.arrayBuffer(),
+    name: file.name.replace(/\.[^/.]+$/, "") || `File ${sideName(side)}`,
+    fileName: file.name,
+    side,
+    encoding: chosen,
+    sessionGeneration: currentSession,
+  });
+  let chosen: CsvEncoding = encoding ?? "utf-8";
+  let parsed: Awaited<ReturnType<typeof parse>>;
   try {
-    checkFileSize(file.name, file.size);
-    const buffer = await file.arrayBuffer();
-    if (session !== sessionGeneration || request !== uploadGeneration[side]) return;
-    const name = file.name.replace(/\.[^/.]+$/, "") || side.toUpperCase();
-    const encoding = ($(`#${side}-encoding`) as HTMLSelectElement).value as CsvEncoding;
-    const parsed = await parseAndProfileInWorker({ content: buffer, name, fileName: file.name, side, encoding, sessionGeneration: session });
-    if (session !== sessionGeneration || request !== uploadGeneration[side]) return;
-    const { summary, profiles } = parsed;
-    state[side] = summary;
-    renderDataset(side, summary, file.name, profiles);
-  } catch (error) {
-    if (session === sessionGeneration && request === uploadGeneration[side]) {
-      state[side] = null;
-      $(`#${side}-dataset`).replaceChildren();
-      throw error;
+    try {
+      parsed = await parse(chosen);
+    } catch (error) {
+      // Excel exports are often Windows-1252: retry once before bothering anyone.
+      if (encoding || errorCodeOf(error) !== "CSV_ENCODING" || !isCurrent()) throw error;
+      chosen = "windows-1252";
+      parsed = await parse(chosen);
     }
+  } catch (error) {
+    if (!isCurrent()) return;
+    $(`#drop-${side}`).classList.add("error");
+    showError(error, "load");
     return;
   }
-  if (state.left && state.right) {
-    await startIdentity();
-  }
+  if (!isCurrent()) return;
+  state.files[side] = { file, summary: parsed.summary, profiles: parsed.profiles, encoding: chosen, detected: !encoding };
+  renderFile(side);
+  updateSteps();
+  if (state.files.left && state.files.right) await setupSettings();
 }
 
-function renderDataset(
-  side: "left" | "right",
-  data: DatasetSummary,
-  filename: string,
-  profiles: ColumnProfile[],
-): void {
-  const target = $(`#${side}-dataset`);
-  target.replaceChildren();
-  target.append(node("p", `File: ${filename}`, "caption"));
+function renderFile(side: Side): void {
+  const zone = $(`#drop-${side}`);
+  const empty = zone.querySelector<HTMLElement>(".dz-empty")!;
+  const loaded = zone.querySelector<HTMLElement>(".dz-loaded")!;
+  const data = state.files[side];
+  zone.classList.toggle("loaded", data !== null);
+  zone.classList.remove("error");
+  empty.hidden = data !== null;
+  loaded.hidden = data === null;
+  loaded.replaceChildren();
+  if (!data) return;
 
-  const label = node("label", "Logical source name");
+  const { summary, file } = data;
+  const summaryRow = node("div", "", "file-summary");
+  const text = node("div", "", "file-text");
+  const title = node("p", file.name, "file-name");
+  title.title = file.name;
+  const encoding = data.encoding === "utf-8" ? "UTF-8" : "Windows-1252";
+  text.append(title, node("p", `${plural(summary.recordCount, "row")} · ${plural(summary.columns.length, "column")} · ${encoding}${data.detected && data.encoding !== "utf-8" ? " (detected)" : ""}`, "file-meta"));
+  summaryRow.append(node("span", "", "file-icon"), text);
+
+  const actions = node("div", "", "file-actions");
+  actions.append(button("Replace", "link", () => $<HTMLInputElement>(`#${side}-file`).click()));
+
+  const details = node("details", "", "disclosure");
+  details.append(node("summary", "Preview and file options"));
+  const body = node("div", "", "disclosure-body");
+
+  const nameField = node("label", "", "field");
+  nameField.append(node("span", "Name used in results and reports", "field-label"));
   const nameInput = node("input");
   nameInput.type = "text";
-  nameInput.value = data.name;
+  nameInput.value = summary.name;
   nameInput.addEventListener("change", () => {
     const trimmed = nameInput.value.trim();
     if (!trimmed) {
-      showError(new AppError("CONTRACT_INVALID", "dataset name cannot be blank"));
-      nameInput.value = data.name;
+      nameInput.value = summary.name;
       return;
     }
-    data.name = trimmed;
-    invalidateResults();
-    edit("dataset-name");
+    summary.name = trimmed;
+    settingsChanged();
   });
-  label.append(nameInput);
+  nameField.append(nameInput);
 
-  target.append(
-    label,
-    node("p", `${data.recordCount} rows · ${data.columns.length} columns`, "caption"),
-  );
+  const encodingField = node("label", "", "field");
+  encodingField.append(node("span", "Text encoding (change it if accents look wrong)", "field-label"));
+  const encodingSelect = selectOf([{ value: "utf-8", label: "UTF-8" }, { value: "windows-1252", label: "Windows-1252 (older Excel exports)" }], data.encoding);
+  encodingSelect.addEventListener("change", () => { void upload(side, file, encodingSelect.value as CsvEncoding).catch((error) => showError(error, "load")); });
+  encodingField.append(encodingSelect);
 
-  const previewRows = data.previewRecords;
-  target.append(
-    renderTable(
-      data.columns.map((col) => ({
-        label: col,
-        value: (row: Record<string, string | null>) => row[col],
-      })),
-      previewRows,
-      `Preview of ${filename}`,
-    ),
-  );
-
-  const details = node("details");
-  details.append(node("summary", "Column profile"));
-  details.append(
-    renderTable(
-      [
-        { label: "Column", value: (r) => r.column_name },
-        { label: "Rows", value: (r) => r.row_count },
-        { label: "Non-null", value: (r) => r.non_null_count },
-        { label: "Null %", value: (r) => r.null_percentage },
-        { label: "Distinct", value: (r) => r.distinct_count },
-        { label: "Unique %", value: (r) => r.uniqueness_percentage },
-        { label: "Samples", value: (r) => r.sample_values.join(", ") },
-      ],
-      profiles,
-      `Column profile of ${filename}`,
-    ),
-  );
-  target.append(details);
+  body.append(nameField, encodingField, previewTable(summary));
+  details.append(body);
+  loaded.append(summaryRow, actions, details);
 }
 
-async function startIdentity(): Promise<void> {
-  if (!state.left || !state.right) return;
-  const suggestion = await queryWorker<IdentityCandidate>("suggest-identity", {}, sessionGeneration);
-  const banner = $("#identity-suggestion");
-  banner.replaceChildren();
-
-  if (suggestion.confident) {
-    banner.append(
-      node(
-        "strong",
-        `Suggested: ${suggestion.left_column} ↔ ${suggestion.right_column}`,
-      ),
-    );
-    banner.append(node("p", suggestion.reasons.join(" · ")));
-  } else {
-    banner.textContent =
-      "No high-confidence pair was found. Review the profiles and choose both fields explicitly.";
-  }
-
-  const leftSelect = select(state.left.columns, suggestion.left_column);
-  const rightSelect = select(state.right.columns, suggestion.right_column);
-  leftSelect.id = "left-identity";
-  rightSelect.id = "right-identity";
-  $("#left-identity").replaceWith(leftSelect);
-  $("#right-identity").replaceWith(rightSelect);
-
-  leftSelect.addEventListener("change", () => { void scoreIdentity("identity-columns").catch(showError); });
-  rightSelect.addEventListener("change", () => { void scoreIdentity("identity-columns").catch(showError); });
-  await scoreIdentity("identity-columns");
-  setProgress(confirmStep(progress, "upload"));
-}
-
-async function scoreIdentity(kind: EditKind): Promise<void> {
-  if (!state.left || !state.right) return;
-  edit(kind);
-  state.identity = null;
-  state.fields = [];
-  state.pairs = [];
-  invalidateResults();
-  for (const selector of ["#field-rows", "#mapping-editors", "#run-summary"]) $(selector).replaceChildren();
-  const leftCol = ($("#left-identity") as HTMLSelectElement).value;
-  const rightCol = ($("#right-identity") as HTMLSelectElement).value;
-
-  const requestSession = sessionGeneration;
-  const evidence = await queryWorker<{ overlap_percentage: number }>("score-identity", { leftColumn: leftCol, rightColumn: rightCol }, requestSession);
-  if (requestSession !== sessionGeneration || !state.left || !state.right || leftCol !== (document.querySelector("#left-identity") as HTMLSelectElement | null)?.value || rightCol !== (document.querySelector("#right-identity") as HTMLSelectElement | null)?.value) return;
-
-  $("#identity-evidence").textContent = `Conservative trimmed/case-insensitive value overlap for selection: ${evidence.overlap_percentage.toFixed(
-    1,
-  )}%. Reconciliation matches identities exactly unless identity normalization is selected.`;
-}
-
-function identityNormalizerInputs(): HTMLInputElement[] {
-  return Array.from(document.querySelectorAll<HTMLInputElement>("#identity-normalizers input[type=checkbox]"));
-}
-
-function selectedIdentityNormalizers(): IdentityNormalizerName[] {
-  return identityNormalizerInputs().filter((input) => input.checked).map((input) => input.value as IdentityNormalizerName);
-}
-
-async function confirmIdentity(): Promise<void> {
-  if (!state.left || !state.right) return;
-  const leftCol = ($("#left-identity") as HTMLSelectElement).value;
-  const rightCol = ($("#right-identity") as HTMLSelectElement).value;
-  const generation = runGeneration;
-  const suggestions = await queryWorker<FieldSuggestion[]>("suggest-fields", { leftIdentity: leftCol, rightIdentity: rightCol }, sessionGeneration);
-  if (generation !== runGeneration || !state.left || !state.right) return;
-
-  state.identity = { left_column: leftCol, right_column: rightCol, normalize: selectedIdentityNormalizers() };
-
-  state.fields = suggestions.map((item) => ({
-    left_column: item.left_column,
-    right_column: item.right_column,
-    mode: "Exact" as ComparisonMode,
-  }));
-
-  renderFieldRows();
-  setProgress(confirmStep(progress, "identity"));
-  focusStep("fields");
-}
-
-function renderFieldRows(): void {
-  if (!state.left || !state.right || !state.identity) return;
-  const target = $("#field-rows");
-  target.replaceChildren();
-
-  const leftColumns = state.left.columns.filter(
-    (item) => item !== state.identity!.left_column,
-  );
-  const rightColumns = state.right.columns.filter(
-    (item) => item !== state.identity!.right_column,
-  );
-
-  state.fields.forEach((field, index) => {
-    const row = node("tr");
-    const leftSel = select(leftColumns, field.left_column);
-    const rightSel = select(rightColumns, field.right_column);
-    const modeSel = select(modes, field.mode);
-
-    leftSel.addEventListener("change", () => {
-      field.left_column = leftSel.value;
-      fieldsChanged();
-    });
-    rightSel.addEventListener("change", () => {
-      field.right_column = rightSel.value;
-      fieldsChanged();
-    });
-    modeSel.addEventListener("change", () => {
-      field.mode = modeSel.value as ComparisonMode;
-      fieldsChanged();
-    });
-
-    const removeBtn = node("button", "Remove", "secondary danger");
-    removeBtn.type = "button";
-    removeBtn.addEventListener("click", () => {
-      state.fields.splice(index, 1);
-      renderFieldRows();
-      fieldsChanged();
-    });
-
-    for (const child of [leftSel, rightSel, modeSel, removeBtn]) {
-      const cell = node("td");
-      cell.append(child);
-      row.append(cell);
-    }
-    target.append(row);
-  });
-}
-
-function fieldsChanged(): void {
-  invalidateResults();
-  edit("field-mappings");
-}
-
-function invalidateResults(): void {
-  runGeneration++;
-  state.contract = null;
-  state.result = null;
-  state.resultPairs = [];
-  for (const selector of ["#metrics", "#identity-issues", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
-    $(selector).replaceChildren();
-  }
-  show("#pair-panel", false);
-}
-
-function addField(): void {
-  if (!state.left || !state.right || !state.identity) return;
-  const usedLeft = new Set(state.fields.map((item) => item.left_column));
-  const usedRight = new Set(state.fields.map((item) => item.right_column));
-  const left = state.left.columns.find(
-    (item) => item !== state.identity!.left_column && !usedLeft.has(item),
-  );
-  const right = state.right.columns.find(
-    (item) => item !== state.identity!.right_column && !usedRight.has(item),
-  );
-  if (!left || !right) return;
-  state.fields.push({ left_column: left, right_column: right, mode: "Exact" });
-  renderFieldRows();
-  fieldsChanged();
-}
-
-function confirmFields(): void {
-  if (!state.left || !state.right || !state.identity) return;
-  const active = state.fields.filter((item) => item.mode !== "Ignore");
-  if (active.length === 0) {
-    showError(new AppError("CONTRACT_INVALID", "select at least one comparison field"));
-    return;
-  }
-  const leftCols = new Set(active.map((f) => f.left_column));
-  const rightCols = new Set(active.map((f) => f.right_column));
-  if (leftCols.size !== active.length || rightCols.size !== active.length) {
-    showError(new AppError("CONTRACT_INVALID", "a field cannot be mapped more than once on either side"));
-    return;
-  }
-
-  setProgress(confirmStep(progress, "fields"));
-  focusStep("mappings");
-  void renderMappingEditors().catch(showError);
-}
-
-async function renderMappingEditors(): Promise<void> {
-  if (!state.left || !state.right || !state.identity) return;
-  const requestSession = sessionGeneration;
-  const requestGeneration = runGeneration;
-  const target = $("#mapping-editors");
-  target.replaceChildren();
-  state.pairs = [];
-
-  const mappingFields = state.fields.filter(
-    (item) => item.mode === "Value mapping",
-  );
-
-  if (mappingFields.length === 0) {
-    target.append(
-      node(
-        "p",
-        "No fields use semantic value mapping. Confirm this step to continue.",
-        "message",
-      ),
-    );
-    return;
-  }
-
-  for (const field of mappingFields) {
-    const evidence = await queryWorker<ObservedPair[]>("mapping-evidence", {
-      leftIdentity: state.identity.left_column,
-      rightIdentity: state.identity.right_column,
-      identityNormalize: state.identity.normalize,
-      leftField: field.left_column,
-      rightField: field.right_column,
-    }, sessionGeneration);
-    if (requestSession !== sessionGeneration || requestGeneration !== runGeneration || !state.identity) return;
-    state.pairs.push({ field, rows: rowsFromEvidence(evidence) });
-  }
-  renderMappingEditorsFromState();
-}
-
-function renderMappingEditorsFromState(): void {
-  const target = $("#mapping-editors");
-  target.replaceChildren();
-  for (const editor of state.pairs) {
-    const heading = node(
-      "h3",
-      `${editor.field.left_column} ↔ ${editor.field.right_column}`,
-    );
-    const addBtn = node("button", "Add mapping row", "secondary");
-    addBtn.type = "button";
-    addBtn.addEventListener("click", () => {
-      editor.rows.push(manualRow());
-      mappingPages.set(editor, Math.floor((editor.rows.length - 1) / 100));
-      mappingChanged();
-      renderMappingEditorsFromState();
-    });
-    const block = node("div");
-    block.append(heading, mappingTable(editor), addBtn);
-    target.append(block);
-  }
-}
-
-function mappingTable(editor: MappingEditorState): HTMLDivElement {
-  const wrapper = node("div", "", "table-scroll");
+function previewTable(summary: DatasetSummary): HTMLElement {
+  const wrapper = node("div", "", "table-card");
   const table = node("table");
-  const headings = [
-    "Accept semantic mapping",
-    "Canonical value",
-    "Dataset A value",
-    "Dataset B value",
-    "Employees",
-    "Consistency %",
-    "Assessment",
-    "",
-  ];
-  table.append(node("caption", `Value mappings for ${editor.field.left_column} ↔ ${editor.field.right_column}`, "sr-only"));
-  const headRow = node("tr");
-  headings.forEach((value) => {
-    const th = node("th", value);
-    th.scope = "col";
-    headRow.append(th);
-  });
-  const head = node("thead");
-  head.append(headRow);
-  const body = node("tbody");
-
-  const pageSize = 100;
-  const pages = Math.max(1, Math.ceil(editor.rows.length / pageSize));
-  const page = Math.min(mappingPages.get(editor) ?? 0, pages - 1);
-  mappingPages.set(editor, page);
-  editor.rows.slice(page * pageSize, (page + 1) * pageSize).forEach((pair) => {
+  table.append(node("caption", `First ${summary.previewRecords.length} rows`, "sr-only"));
+  const head = node("tr");
+  for (const column of summary.columns) head.append(node("th", column));
+  const thead = node("thead");
+  thead.append(head);
+  const tbody = node("tbody");
+  for (const record of summary.previewRecords) {
     const row = node("tr");
-    const checkbox = node("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = pair.accepted ?? false;
-    checkbox.addEventListener("change", () => {
-      pair.accepted = checkbox.checked;
-      mappingChanged();
-    });
-
-    const canonicalInput = node("input");
-    canonicalInput.type = "text";
-    canonicalInput.value = pair.canonical;
-    canonicalInput.addEventListener("input", () => {
-      pair.canonical = canonicalInput.value;
-      mappingEdited.schedule();
-    });
-    canonicalInput.addEventListener("change", () => mappingEdited.flush());
-
-    const valueInput = (side: "left" | "right"): HTMLInputElement => {
-      const input = node("input");
-      input.type = "text";
-      input.placeholder = MISSING_LABEL;
-      input.value = inputFromValue(pair[side]);
-      input.addEventListener("input", () => {
-        pair[side] = valueFromInput(input.value);
-        mappingEdited.schedule();
-      });
-      input.addEventListener("change", () => mappingEdited.flush());
-      return input;
-    };
-    const leftInput = valueInput("left");
-    const rightInput = valueInput("right");
-
-    const removeBtn = node("button", "Remove", "secondary danger");
-    removeBtn.type = "button";
-    removeBtn.addEventListener("click", () => {
-      editor.rows.splice(editor.rows.indexOf(pair), 1);
-      mappingPages.set(editor, Math.min(page, Math.max(0, Math.ceil(editor.rows.length / pageSize) - 1)));
-      renderMappingEditorsFromState();
-      mappingChanged();
-    });
-
-    const cells = [
-      checkbox,
-      canonicalInput,
-      leftInput,
-      rightInput,
-      node("span", String(pair.count)),
-      node("span", String(pair.consistency_percentage)),
-      node("span", pair.assessment),
-      removeBtn,
-    ];
-    for (const value of cells) {
-      const cell = node("td");
-      cell.append(value);
-      row.append(cell);
-    }
-    body.append(row);
-  });
-
-  table.append(head, body);
+    for (const column of summary.columns) row.append(valueCell(record[column] ?? null));
+    tbody.append(row);
+  }
+  table.append(thead, tbody);
   wrapper.append(table);
-  wrapper.prepend(node("p", `Mapping evidence: ${editor.rows.length.toLocaleString()} · page ${page + 1} of ${pages}`, "caption"));
-  const controls = node("div", "", "actions");
-  const prev = node("button", "Previous page", "secondary");
-  prev.type = "button"; prev.disabled = page === 0;
-  prev.addEventListener("click", () => { mappingPages.set(editor, page - 1); renderMappingEditorsFromState(); });
-  const next = node("button", "Next page", "secondary");
-  next.type = "button"; next.disabled = page + 1 >= pages;
-  next.addEventListener("click", () => { mappingPages.set(editor, page + 1); renderMappingEditorsFromState(); });
-  controls.append(prev, next);
-  wrapper.append(controls);
   return wrapper;
 }
 
-function mappingChanged(): void {
-  mappingEdited.cancel();
-  invalidateResults();
-  edit("value-mappings");
+function valueCell(value: string | null, className = ""): HTMLTableCellElement {
+  const cell = node("td", value ?? "—", className);
+  if (value === null) cell.classList.add("empty-value");
+  return cell;
 }
 
-// Typing updates the rows at once, but resets later steps only when the user
-// pauses or leaves the field, not on every keystroke.
-const mappingEdited = debounce(mappingChanged, 300);
-
-async function confirmMappings(): Promise<void> {
-  mappingEdited.flush();
-  const leftName = state.left?.name || "left";
-  const rightName = state.right?.name || "right";
-  const suggestedName =
-    `${leftName}_vs_${rightName}`
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_|_$/g, "") || "ui_reconciliation";
-
-  ($("#contract-name") as HTMLInputElement).value = suggestedName;
-  const count = state.fields.filter((item) => item.mode !== "Ignore").length;
-  const identityRule = state.identity?.normalize.length ? ` (normalized: ${state.identity.normalize.join(", ")})` : " (exact)";
-  $("#run-summary").textContent = `Identity: ${state.identity?.left_column} ↔ ${state.identity?.right_column}${identityRule} · Comparison fields: ${count}`;
-  const generation = runGeneration;
-  try {
-    await buildCurrentContract();
-  } catch (error) {
-    showError(error);
-    return;
-  }
-  if (generation !== runGeneration) return;
-  setProgress(confirmStep(progress, "mappings"));
-  focusStep("run");
-}
-
-// The wizard state becomes a configuration here; the worker validates it and
-// builds the contract.
-async function buildCurrentContract(): Promise<ReconciliationContract> {
-  if (!state.left || !state.right || !state.identity) throw new AppError("SESSION_STATE", "upload both datasets and confirm identity first");
-  const fieldSelections: FieldSelection[] = state.fields.map((f) => {
-    const editor = state.pairs.find((ed) => ed.field.left_column === f.left_column);
-    if (f.mode !== "Value mapping" || !editor) return f;
-    return { ...f, value_mappings: selectionsFromRows(editor.field.left_column, editor.rows) };
+function setupDropzone(side: Side): void {
+  const zone = $(`#drop-${side}`);
+  const input = $<HTMLInputElement>(`#${side}-file`);
+  const empty = zone.querySelector<HTMLElement>(".dz-empty")!;
+  const open = () => input.click();
+  empty.addEventListener("click", open);
+  empty.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      open();
+    }
   });
-  const configuration: WizardConfiguration = {
-    contract_name: ($("#contract-name") as HTMLInputElement).value.trim() || "ui_reconciliation",
-    left_name: state.left.name, right_name: state.right.name,
-    left_identity: state.identity.left_column, right_identity: state.identity.right_column,
-    identity_normalize: state.identity.normalize,
-    fields: fieldSelections,
-  };
-  return queryWorker<ReconciliationContract>("build-contract", { configuration }, sessionGeneration);
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    input.value = "";
+    if (file) upload(side, file).catch((error) => showError(error, "load"));
+  });
+  zone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    zone.classList.add("drag-over");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+  zone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    zone.classList.remove("drag-over");
+    const file = event.dataTransfer?.files[0];
+    if (file) upload(side, file).catch((error) => showError(error, "load"));
+  });
 }
 
-async function runReconciliation(): Promise<void> {
-  if (!state.left || !state.right || !state.identity) return;
-  const contract = await buildCurrentContract();
-  setProgress(reach("run"));
-  await runContract(contract, () => setProgress(confirmStep(progress, "run")));
+// ---------- Step 2: match settings ----------
+
+function resetSettings(): void {
+  setupGeneration++;
+  invalidateRun();
+  state.keyStats = null;
+  state.keyAuto = null;
+  state.columns = [];
+  state.imported = null;
+  for (const id of ["#key-left", "#key-right", "#key-evidence", "#column-list", "#unpaired", "#imported-summary", "#compare-summary"]) $(id).replaceChildren();
+  $("#imported-summary").hidden = true;
+  $("#wizard").hidden = false;
+  clearMessages("settings");
 }
 
-// Runs a contract (from the wizard or an imported one) and shows its results.
-async function runContract(contract: ReconciliationContract, showResults: () => void): Promise<void> {
-  invalidateResults();
-  const configGeneration = runGeneration;
-  const currentSession = sessionGeneration;
-  let dashboard: ReconciliationDashboard;
-  try {
-    dashboard = await reconcileInWorker({ contract, sessionGeneration: currentSession });
-  } catch (error) {
-    if (currentSession === sessionGeneration && configGeneration === runGeneration) showError(error);
-    return;
+async function setupSettings(): Promise<void> {
+  const generation = ++setupGeneration;
+  const left = state.files.left!.summary;
+  const right = state.files.right!.summary;
+  const suggestion = await queryWorker<IdentityCandidate>("suggest-identity", {}, session);
+  if (generation !== setupGeneration) return;
+  const remembered = state.remembered.key;
+  const useRemembered = Boolean(remembered && left.columns.includes(remembered.left) && right.columns.includes(remembered.right));
+  state.key.left = useRemembered ? remembered!.left : suggestion.left_column;
+  state.key.right = useRemembered ? remembered!.right : suggestion.right_column;
+  renderKeySelects();
+  await applyKey({ automatic: true, rememberedOptions: useRemembered ? remembered!.normalize : null, generation });
+  if (generation === setupGeneration) focusStep("settings");
+}
+
+function renderKeySelects(): void {
+  for (const side of ["left", "right"] as const) {
+    const columns = state.files[side]!.summary.columns.map((column) => ({ value: column, label: column }));
+    const select = selectOf(columns, state.key[side]);
+    select.id = `key-${side}`;
+    select.addEventListener("change", () => {
+      state.key[side] = select.value;
+      void applyKey({ automatic: true, rememberedOptions: null, generation: ++setupGeneration }).catch((error) => showError(error, "settings"));
+    });
+    $(`#key-${side}`).replaceWith(select);
   }
-  if (currentSession !== sessionGeneration || configGeneration !== runGeneration) return;
+}
 
-  state.contract = contract;
-  state.result = dashboard;
-  renderMetrics(dashboard.summary);
-  loadIdentityIssues(0).catch(showError);
-  renderFieldSummary(dashboard.fields);
-  $("#matching-summary").replaceChildren(node("p", `${dashboard.matchingCount.toLocaleString()} matching comparisons. Expand to load details.`, "caption"));
+function keyOptionInputs(): HTMLInputElement[] {
+  return Array.from(document.querySelectorAll<HTMLInputElement>("#key-options input[type=checkbox]"));
+}
 
-  showResults();
+// Measures how the chosen key columns line up, switches on the options that
+// match the most keys, then pairs the columns and picks how to compare them.
+async function applyKey(options: { automatic: boolean; rememberedOptions: IdentityNormalizerName[] | null; generation: number }): Promise<void> {
+  invalidateRun();
+  const stats = await queryWorker<IdentityOptionsSuggestion>("identity-options", { leftColumn: state.key.left, rightColumn: state.key.right }, session);
+  if (options.generation !== setupGeneration) return;
+  state.keyStats = stats;
+  state.keyAuto = null;
+  if (options.rememberedOptions) {
+    state.key.normalize = options.rememberedOptions;
+  } else if (options.automatic) {
+    state.key.normalize = stats.normalize;
+    const gained = stats.matched_keys - stats.exact_matched_keys;
+    if (gained > 0) state.keyAuto = { options: stats.normalize.filter((name) => name !== "trim" || stats.normalize.length === 1), gained };
+  }
+  for (const input of keyOptionInputs()) input.checked = state.key.normalize.includes(input.value as IdentityNormalizerName);
+  renderKeyEvidence();
+  await pairColumns(options.generation);
+}
+
+function keyCounts(normalize: IdentityNormalizerName[]) {
+  const wanted = [...normalize].sort().join(",");
+  return state.keyStats?.by_options.find((entry) => [...entry.normalize].sort().join(",") === wanted) ?? null;
+}
+
+function renderKeyEvidence(): void {
+  const target = $("#key-evidence");
+  target.replaceChildren();
+  const stats = state.keyStats;
+  const current = keyCounts(state.key.normalize);
+  if (!stats || !current) return;
+  const ratio = current.left_keys > 0 ? current.matched_keys / current.left_keys : 0;
+  const tone = ratio >= 0.9 ? "ok" : ratio >= 0.5 ? "warn" : "error";
+  const found = `${count(current.matched_keys)} of ${count(current.left_keys)} keys in File A were also found in File B (${percent(current.matched_keys, current.left_keys)}).`;
+  const advice = tone === "ok" ? "" : tone === "warn"
+    ? "Some missing keys can be normal (joiners and leavers); if many are, check the key columns."
+    : "This is probably not the right column. Choose the columns that identify the same person in both files.";
+  const parts: MessageOptions = { tone, title: found, detail: advice || undefined };
+
+  if (state.keyAuto && state.keyAuto.options.length) {
+    const labels = state.keyAuto.options.map((name) => `“${IDENTITY_OPTION_LABELS[name].replace(/ \(.*\)$/, "").toLowerCase()}”`).join(" and ");
+    parts.detail = [advice, `Switched on ${labels}: that matches ${plural(state.keyAuto.gained, "more key")}.`].filter(Boolean).join(" ");
+    ($("#key-options") as HTMLDetailsElement).open = true;
+  }
+  const best = keyCounts(stats.normalize);
+  if (best && best.matched_keys > current.matched_keys) {
+    const missing = stats.normalize.filter((name) => !state.key.normalize.includes(name));
+    parts.actions = [button(`Turn on ${missing.map((name) => `“${IDENTITY_OPTION_LABELS[name].replace(/ \(.*\)$/, "").toLowerCase()}”`).join(" and ")} (+${count(best.matched_keys - current.matched_keys)} keys)`, "link", () => {
+      state.key.normalize = stats.normalize;
+      for (const input of keyOptionInputs()) input.checked = state.key.normalize.includes(input.value as IdentityNormalizerName);
+      renderKeyEvidence();
+      settingsChanged();
+    })];
+  }
+  target.append(messageElement(parts));
+}
+
+async function pairColumns(generation: number): Promise<void> {
+  const identity = { leftIdentity: state.key.left, rightIdentity: state.key.right, identityNormalize: state.key.normalize };
+  const pairs = await queryWorker<FieldPairSuggestion[]>("suggest-fields", identity, session);
+  if (generation !== setupGeneration) return;
+  const modes = await queryWorker<ModeSuggestion[]>("suggest-modes", { ...identity, fields: pairs }, session);
+  if (generation !== setupGeneration) return;
+  state.columns = pairs.map((pair, index) => {
+    const suggestion = modes[index];
+    const remembered = state.remembered.columns[pairKey(pair.left_column, pair.right_column)];
+    return {
+      id: nextColumnId++,
+      include: remembered?.include ?? true,
+      left_column: pair.left_column,
+      right_column: pair.right_column,
+      mode: remembered?.mode ?? suggestion.mode,
+      format: remembered ? remembered.format : suggestion.format,
+      tolerance: remembered?.tolerance,
+      suggestion,
+      pairReason: pair.by === "content" ? pair.reason : null,
+      remembered: Boolean(remembered),
+      mapping: null,
+    };
+  });
+  renderColumns();
+  for (const row of state.columns) if (row.include && row.mode === "Value mapping") void loadMapping(row).catch((error) => showError(error, "settings"));
+}
+
+function keyColumns() {
+  return { left: state.files.left!.summary.columns.filter((column) => column !== state.key.left), right: state.files.right!.summary.columns.filter((column) => column !== state.key.right) };
+}
+
+function renderColumns(): void {
+  const list = $("#column-list");
+  list.replaceChildren(...state.columns.map(columnRowElement));
+  if (state.columns.length === 0) list.append(node("p", "No columns are paired yet. Add a column pair to compare.", "empty-state"));
+  renderUnpaired();
+  renderCompareSummary();
+}
+
+function columnRowElement(row: ColumnRow): HTMLElement {
+  const element = node("div", "", "column-row");
+  element.setAttribute("role", "listitem");
+  element.dataset.id = String(row.id);
+  element.classList.toggle("excluded", !row.include);
+  const { left, right } = keyColumns();
+
+  const main = node("div", "", "column-main");
+  const include = node("label", "", "include");
+  const checkbox = node("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = row.include;
+  checkbox.setAttribute("aria-label", `Compare ${row.left_column}`);
+  checkbox.addEventListener("change", () => {
+    row.include = checkbox.checked;
+    element.classList.toggle("excluded", !row.include);
+    if (row.include && row.mode === "Value mapping" && !row.mapping) void loadMapping(row).catch((error) => showError(error, "settings"));
+    settingsChanged();
+    renderCompareSummary();
+  });
+  include.append(checkbox);
+
+  const columnSelect = (side: Side) => {
+    const select = selectOf((side === "left" ? left : right).map((column) => ({ value: column, label: column })), side === "left" ? row.left_column : row.right_column);
+    select.className = side === "left" ? "a" : "b";
+    select.setAttribute("aria-label", `Column in File ${sideName(side)}`);
+    select.addEventListener("change", () => {
+      if (side === "left") row.left_column = select.value;
+      else row.right_column = select.value;
+      row.pairReason = null;
+      row.mapping = null;
+      settingsChanged();
+      void resuggestMode(row).catch((error) => showError(error, "settings"));
+    });
+    return select;
+  };
+
+  const how = selectOf(MODE_CHOICES.map((choice) => ({ value: choice.value, label: choice.label })), modeChoice(row.mode, row.format).value);
+  how.className = "how";
+  how.setAttribute("aria-label", `How to compare ${row.left_column}`);
+  how.addEventListener("change", () => {
+    const choice = MODE_CHOICES.find((item) => item.value === how.value)!;
+    setMode(row, choice.mode, choice.format);
+  });
+
+  main.append(include, columnSelect("left"), node("span", "↔", "pair-arrow"), columnSelect("right"), how);
+  if (row.mode === "Number") main.append(toleranceField(row));
+  element.append(main, columnHint(row));
+  if (row.mode === "Value mapping" && row.include) element.append(translationsPanel(row));
+  return element;
+}
+
+function toleranceField(row: ColumnRow): HTMLElement {
+  const label = node("label", "", "tolerance");
+  label.append("Ignore differences up to");
+  const input = node("input");
+  input.type = "number";
+  input.min = "0";
+  input.step = "any";
+  input.placeholder = "0";
+  input.value = row.tolerance ? String(row.tolerance) : "";
+  input.setAttribute("aria-label", `Ignore differences in ${row.left_column} up to`);
+  input.addEventListener("change", () => {
+    const value = Number(input.value);
+    row.tolerance = input.value.trim() !== "" && Number.isFinite(value) && value > 0 ? value : undefined;
+    input.value = row.tolerance ? String(row.tolerance) : "";
+    settingsChanged();
+  });
+  label.append(input);
+  return label;
+}
+
+function columnHint(row: ColumnRow): HTMLElement {
+  const hint = node("div", "", "column-hint");
+  const suggestion = row.suggestion;
+  if (row.pairReason) hint.append(node("span", row.pairReason + "."));
+  if (!suggestion || suggestion.left_column !== row.left_column || suggestion.right_column !== row.right_column) return hint;
+  const chosen = modeChoice(row.mode, row.format);
+  const suggested = modeChoice(suggestion.mode, suggestion.format);
+  if (chosen.value === suggested.value) {
+    hint.prepend(node("span", "Suggested", "tag"), node("span", suggestion.reason));
+  } else {
+    hint.classList.add("differs");
+    hint.prepend(
+      node("span", row.remembered ? "Your earlier choice" : "Suggestion", "tag"),
+      node("span", `${suggested.label}: ${suggestion.reason}`),
+      button("Use suggestion", "link", () => setMode(row, suggestion.mode, suggestion.format)),
+    );
+  }
+  return hint;
+}
+
+function setMode(row: ColumnRow, mode: ComparisonMode, format?: ValueFormat): void {
+  row.mode = mode;
+  row.format = format;
+  if (mode !== "Number") row.tolerance = undefined;
+  settingsChanged();
+  rerenderColumn(row);
+  if (mode === "Value mapping" && row.include && !row.mapping) void loadMapping(row).catch((error) => showError(error, "settings"));
+}
+
+function rerenderColumn(row: ColumnRow): void {
+  const current = document.querySelector(`#column-list [data-id="${row.id}"]`);
+  if (current) current.replaceWith(columnRowElement(row));
+  else renderColumns();
+}
+
+// After the user re-pairs a column, measure the new pair and adopt its suggested mode.
+async function resuggestMode(row: ColumnRow): Promise<void> {
+  const generation = setupGeneration;
+  row.suggestion = null;
+  rerenderColumn(row);
+  renderUnpaired();
+  const [suggestion] = await queryWorker<ModeSuggestion[]>("suggest-modes", {
+    leftIdentity: state.key.left, rightIdentity: state.key.right, identityNormalize: state.key.normalize,
+    fields: [{ left_column: row.left_column, right_column: row.right_column }],
+  }, session);
+  if (generation !== setupGeneration || suggestion.left_column !== row.left_column || suggestion.right_column !== row.right_column) return;
+  row.suggestion = suggestion;
+  row.remembered = false;
+  setMode(row, suggestion.mode, suggestion.format);
+}
+
+function renderUnpaired(): void {
+  const target = $("#unpaired");
+  target.replaceChildren();
+  if (!state.files.left || !state.files.right) return;
+  const { left, right } = keyColumns();
+  const usedLeft = new Set(state.columns.map((row) => row.left_column));
+  const usedRight = new Set(state.columns.map((row) => row.right_column));
+  const freeLeft = left.filter((column) => !usedLeft.has(column));
+  const freeRight = right.filter((column) => !usedRight.has(column));
+  if (freeLeft.length + freeRight.length === 0) return;
+  target.append("Not compared: ");
+  if (freeLeft.length) {
+    target.append("File A ");
+    target.append(node("b", freeLeft.join(", ")));
+  }
+  if (freeLeft.length && freeRight.length) target.append(" · ");
+  if (freeRight.length) {
+    target.append("File B ");
+    target.append(node("b", freeRight.join(", ")));
+  }
+  $<HTMLButtonElement>("#add-pair").disabled = freeLeft.length === 0 || freeRight.length === 0;
+}
+
+function addPair(): void {
+  const { left, right } = keyColumns();
+  const usedLeft = new Set(state.columns.map((row) => row.left_column));
+  const usedRight = new Set(state.columns.map((row) => row.right_column));
+  const leftColumn = left.find((column) => !usedLeft.has(column));
+  const rightColumn = right.find((column) => !usedRight.has(column));
+  if (!leftColumn || !rightColumn) return;
+  const row: ColumnRow = { id: nextColumnId++, include: true, left_column: leftColumn, right_column: rightColumn, mode: "Exact", suggestion: null, pairReason: null, remembered: false, mapping: null };
+  state.columns.push(row);
+  renderColumns();
+  settingsChanged();
+  document.querySelector<HTMLSelectElement>(`#column-list [data-id="${row.id}"] select.a`)?.focus();
+  void resuggestMode(row).catch((error) => showError(error, "settings"));
+}
+
+function renderCompareSummary(): void {
+  const included = state.columns.filter((row) => row.include).length;
+  $("#compare-summary").textContent = state.imported ? "" : included === 0 ? "Tick at least one column to compare." : `Compares ${plural(included, "column")} for every key found in both files.`;
+}
+
+// ---------- Translations (value mappings) ----------
+
+async function loadMapping(row: ColumnRow): Promise<void> {
+  const generation = setupGeneration;
+  const pair = `${row.left_column}\u0000${row.right_column}`;
+  const evidence = await queryWorker<ObservedPair[]>("mapping-evidence", {
+    leftIdentity: state.key.left, rightIdentity: state.key.right, identityNormalize: state.key.normalize,
+    leftField: row.left_column, rightField: row.right_column,
+  }, session);
+  if (generation !== setupGeneration || pair !== `${row.left_column}\u0000${row.right_column}` || row.mapping?.loaded) return;
+  // Identical values already match; only differing pairs need a translation.
+  row.mapping = { rows: rowsFromEvidence(evidence).filter((item) => item.left !== item.right), loaded: true, page: 0 };
+  rerenderColumn(row);
+}
+
+function translationsPanel(row: ColumnRow): HTMLElement {
+  const panel = node("div", "", "translations");
+  const mapping = row.mapping;
+  if (!mapping) {
+    panel.append(node("p", "Collecting the values to translate…", "helper"));
+    return panel;
+  }
+  const ticked = mapping.rows.filter((item) => item.accepted).length;
+  panel.append(node("p", `Tick the pairs that mean the same thing; unticked pairs count as differences. ${count(ticked)} of ${count(mapping.rows.length)} ticked.`, "helper"));
+  if (mapping.rows.length === 0) {
+    panel.append(node("p", "The values in these columns are already identical where they exist on both sides, so there is nothing to translate. Add a translation, or compare exactly.", "helper"));
+  } else {
+    const pages = Math.max(1, Math.ceil(mapping.rows.length / MAPPING_PAGE_SIZE));
+    mapping.page = Math.min(mapping.page, pages - 1);
+    const wrapper = node("div", "", "table-card");
+    const table = node("table");
+    table.append(node("caption", `Translations for ${row.left_column}`, "sr-only"));
+    const head = node("tr");
+    for (const [label, className] of [["Same?", ""], [`Value in ${fileName("left")}`, "sub-a"], [`Value in ${fileName("right")}`, "sub-b"], ["Rows", "num"], ["", ""]]) head.append(node("th", label, className));
+    const thead = node("thead");
+    thead.append(head);
+    const tbody = node("tbody");
+    for (const item of mapping.rows.slice(mapping.page * MAPPING_PAGE_SIZE, (mapping.page + 1) * MAPPING_PAGE_SIZE)) tbody.append(translationRow(row, item));
+    table.className = "results";
+    table.append(thead, tbody);
+    wrapper.append(table);
+    panel.append(wrapper);
+    if (pages > 1) {
+      const pager = node("div", "", "pager");
+      pager.append(
+        node("span", `Page ${mapping.page + 1} of ${pages}`),
+        pageButton("Previous", mapping.page === 0, () => { mapping.page--; rerenderColumn(row); }),
+        pageButton("Next", mapping.page + 1 >= pages, () => { mapping.page++; rerenderColumn(row); }),
+      );
+      panel.append(pager);
+    }
+  }
+  const actions = node("div", "", "actions");
+  actions.append(button("Add a translation", "secondary small", () => {
+    const added = manualRow();
+    mapping.rows.push(added);
+    mapping.page = Math.floor((mapping.rows.length - 1) / MAPPING_PAGE_SIZE);
+    settingsChanged();
+    rerenderColumn(row);
+  }));
+  if (mapping.rows.length > 1) {
+    actions.append(
+      button("Tick all", "link", () => { for (const item of mapping.rows) if (item.left !== null && item.right !== null) item.accepted = true; settingsChanged(); rerenderColumn(row); }),
+      button("Untick all", "link", () => { for (const item of mapping.rows) item.accepted = false; settingsChanged(); rerenderColumn(row); }),
+    );
+  }
+  panel.append(actions);
+  return panel;
+}
+
+function translationRow(row: ColumnRow, item: MappingEditorRow): HTMLTableRowElement {
+  const tr = node("tr");
+  const checkCell = node("td");
+  const checkbox = node("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = item.accepted;
+  const complete = item.left !== null && item.right !== null;
+  checkbox.disabled = !complete && item.assessment !== "Manual";
+  checkbox.setAttribute("aria-label", `Treat ${item.left ?? "empty"} and ${item.right ?? "empty"} as the same`);
+  checkbox.addEventListener("change", () => {
+    item.accepted = checkbox.checked;
+    settingsChanged();
+    rerenderColumn(row);
+  });
+  checkCell.append(checkbox);
+  tr.append(checkCell);
+
+  for (const side of ["left", "right"] as const) {
+    if (item.assessment === "Manual") {
+      const cell = node("td");
+      const input = node("input");
+      input.type = "text";
+      input.value = item[side] ?? "";
+      input.placeholder = `Value in File ${sideName(side)}`;
+      input.addEventListener("change", () => {
+        item[side] = input.value === "" ? null : input.value;
+        item.canonical = "";
+        settingsChanged();
+      });
+      cell.append(input);
+      tr.append(cell);
+    } else {
+      tr.append(valueCell(item[side], "mono"));
+    }
+  }
+  const evidence = item.assessment === "Manual" ? "Added by you" : item.assessment === "Imported" ? "From saved settings" : count(item.count);
+  tr.append(node("td", evidence, item.assessment === "Manual" || item.assessment === "Imported" ? "note" : "num"));
+  const removeCell = node("td");
+  if (item.assessment === "Manual") {
+    removeCell.append(button("Remove", "link", () => {
+      row.mapping!.rows.splice(row.mapping!.rows.indexOf(item), 1);
+      settingsChanged();
+      rerenderColumn(row);
+    }));
+  } else if (!complete) {
+    removeCell.append(node("span", "One side is empty", "helper"));
+  } else if (item.consistency_percentage < 95 && item.assessment !== "Imported") {
+    removeCell.append(node("span", "Not always paired", "helper"));
+  }
+  tr.append(removeCell);
+  return tr;
+}
+
+// ---------- Settings → contract ----------
+
+function slug(text: string): string {
+  return text.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "reconciliation";
+}
+
+function configuration(): WizardConfiguration {
+  const included = state.columns.filter((row) => row.include);
+  if (included.length === 0) throw new AppError("CONTRACT_INVALID", "tick at least one column to compare");
+  for (const side of ["left_column", "right_column"] as const) {
+    const seen = new Set<string>();
+    for (const row of included) {
+      if (seen.has(row[side])) throw new AppError("CONTRACT_INVALID", `the column “${row[side]}” is used in two pairs; each column can be compared once`);
+      seen.add(row[side]);
+    }
+  }
+  const fields: FieldSelection[] = included.map((row) => ({
+    left_column: row.left_column,
+    right_column: row.right_column,
+    mode: row.mode,
+    ...(row.format ? { format: row.format } : {}),
+    ...(row.mode === "Number" && row.tolerance ? { tolerance: row.tolerance } : {}),
+    ...(row.mode === "Value mapping" ? { value_mappings: selectionsFromRows(row.left_column, row.mapping?.rows ?? []) } : {}),
+  }));
+  const { a, b } = names();
+  return {
+    contract_name: slug(`${a}_vs_${b}`),
+    left_name: a,
+    right_name: b,
+    left_identity: state.key.left,
+    right_identity: state.key.right,
+    identity_normalize: state.key.normalize,
+    fields,
+  };
+}
+
+async function buildContract(): Promise<ReconciliationContract> {
+  // Translations are collected on demand; make sure every one is ready.
+  for (const row of state.columns) if (row.include && row.mode === "Value mapping" && !row.mapping) await loadMapping(row);
+  return queryWorker<ReconciliationContract>("build-contract", { configuration: configuration() }, session);
+}
+
+// Every settings edit marks earlier results as out of date and is remembered.
+function settingsChanged(): void {
+  rememberSettings();
+  if (!state.run) return;
+  if (!state.stale) {
+    state.stale = true;
+    showMessage("results", {
+      tone: "warn",
+      id: "stale",
+      title: "The settings changed since these results were made.",
+      detail: "Compare again to update them.",
+      actions: [button("Compare again", "secondary small", () => { void compare().catch((error) => showError(error, "settings")); })],
+    });
+  }
+  updateSteps();
+}
+
+function rememberSettings(): void {
+  if (state.imported || !state.key.left) return;
+  const remembered = state.remembered;
+  remembered.key = { left: state.key.left, right: state.key.right, normalize: [...state.key.normalize] };
+  for (const row of state.columns) {
+    const suggested = row.suggestion && modeChoice(row.suggestion.mode, row.suggestion.format).value === modeChoice(row.mode, row.format).value;
+    const key = pairKey(row.left_column, row.right_column);
+    // Only deliberate choices are remembered; suggestions are recomputed from the data.
+    if (row.include && suggested && !row.tolerance) delete remembered.columns[key];
+    else remembered.columns[key] = { include: row.include, mode: row.mode, format: row.format, tolerance: row.tolerance };
+  }
+  saveRemembered(remembered);
+}
+
+// ---------- Run ----------
+
+function invalidateRun(): void {
+  runGeneration++;
+  rowsGeneration++;
+  state.run = null;
+  state.stale = false;
+  state.patterns.clear();
+  for (const id of ["#verdict", "#kpis", "#hints", "#column-summary", "#active-filters", "#row-count", "#results-table", "#pager"]) $(id).replaceChildren();
+  clearMessages("results");
+  updateSteps();
+}
+
+async function compare(): Promise<void> {
+  clearMessages("settings", "error");
+  const contract = state.imported ? state.imported.contract : await buildContract();
+  await runContract(contract);
+}
+
+async function runContract(contract: ReconciliationContract): Promise<void> {
+  const generation = ++runGeneration;
+  const currentSession = session;
+  const dashboard = await reconcileInWorker({ contract, sessionGeneration: currentSession });
+  if (generation !== runGeneration || currentSession !== session) return;
+  rowsGeneration++;
+  state.run = { contract, dashboard };
+  state.stale = false;
+  state.patterns.clear();
+  const issues = dashboard.rows.differs + dashboard.rows.only_a + dashboard.rows.only_b + dashboard.rows.duplicate + dashboard.rows.blank_key;
+  state.view = { ...DEFAULT_VIEW, filter: issues === 0 ? "all" : "issues" };
+  ($("#search") as HTMLInputElement).value = "";
+  clearMessages("results");
+  updateSteps();
+  renderResults();
+  await loadRows();
   focusStep("results");
 }
 
-async function loadIdentityIssues(pageNumber: number): Promise<void> {
-  if (!state.result) return;
-  const page = await queryWorker<WorkerPage<IdentityIssue>>("identity-issues", { page: pageNumber, pageSize: 100, resultId: state.result.resultId }, sessionGeneration);
-  if (!state.result) return;
-  if (page.total === 0) {
-    $("#identity-issues").replaceChildren(node("p", "Every identity matched exactly once on both sides.", "message"));
+// ---------- Step 3: results ----------
+
+function renderResults(): void {
+  const run = state.run;
+  if (!run) return;
+  const { rows } = run.dashboard;
+  const { a, b } = names();
+  const inBoth = rows.match + rows.differs;
+  const issues = rows.differs + rows.only_a + rows.only_b + rows.duplicate + rows.blank_key;
+  const verdict = $("#verdict");
+  verdict.classList.toggle("ok", issues === 0);
+  if (issues === 0) {
+    verdict.textContent = `✓ No differences: both files match on all ${plural(inBoth, "row")}.`;
+  } else {
+    const parts = [`${count(rows.differs)} of ${plural(inBoth, "matched row")} ${rows.differs === 1 ? "has" : "have"} differences`];
+    if (rows.only_a) parts.push(`${count(rows.only_a)} only in ${a}`);
+    if (rows.only_b) parts.push(`${count(rows.only_b)} only in ${b}`);
+    if (rows.duplicate + rows.blank_key) parts.push(`${plural(rows.duplicate + rows.blank_key, "key")} to check`);
+    verdict.textContent = `${parts.join(" · ")}.`;
+  }
+  renderKpis();
+  renderHints(run.dashboard.hints);
+  renderColumnSummary();
+}
+
+function renderKpis(): void {
+  const run = state.run!;
+  $("#kpis").replaceChildren(...kpiTiles(run.dashboard.rows, names()).map((tile) => {
+    const element = button("", "kpi", () => setView({ filter: state.view.filter === tile.filter ? "issues" : tile.filter, field: null, pair: null }));
+    element.dataset.tone = tile.tone;
+    element.dataset.zero = String(tile.value === 0);
+    element.setAttribute("aria-pressed", String(state.view.filter === tile.filter));
+    const label = node("span", "", "kpi-label");
+    label.append(node("span", tile.icon, "kpi-icon"), tile.label);
+    element.append(node("span", count(tile.value), "kpi-value"), label);
+    return element;
+  }));
+}
+
+function renderHints(hints: FixHint[]): void {
+  const target = $("#hints");
+  target.replaceChildren();
+  if (state.imported) return;
+  for (const hint of hints) {
+    const row = state.columns.find((item) => item.include && item.left_column === hint.field);
+    if (!row) continue;
+    const label = row.left_column === row.right_column ? row.left_column : `${row.left_column} / ${row.right_column}`;
+    target.append(messageElement({
+      tone: "accent",
+      title: `${count(hint.fixes)} of ${plural(hint.differences, "difference")} in “${label}” look like formatting only.`,
+      detail: `For example “${hint.example.a}” in ${fileName("left")} and “${hint.example.b}” in ${fileName("right")}.`,
+      actions: [button(`${modeAction(hint.mode)} and update`, "secondary small", () => {
+        setMode(row, hint.mode, hint.format);
+        void compare().catch((error) => showError(error, "results"));
+      })],
+    }));
+  }
+}
+
+function fieldLabel(fieldName: string): string {
+  const field = state.run?.contract.fields.find((item) => item.name === fieldName);
+  return field && field.left !== field.right ? `${field.left} / ${field.right}` : fieldName;
+}
+
+function renderColumnSummary(): void {
+  const run = state.run!;
+  const target = $("#column-summary");
+  target.replaceChildren();
+  const fields = run.dashboard.fields;
+  if (fields.length === 0) {
+    target.append(node("p", "Every compared column matches for all keys found in both files.", "helper"));
     return;
   }
-  $("#identity-issues").replaceChildren(loadRemoteTable(
-    [
-      { label: "Employee identity", value: (row) => display(row.identity) },
-      { label: "Status", value: (row) => row.status },
-      { label: "Dataset A rows", value: (row) => row.left_rows.join(", ") },
-      { label: "Dataset B rows", value: (row) => row.right_rows.join(", ") },
-    ],
-    page,
-    "Identity issues",
-    (nextPage) => loadIdentityIssues(nextPage).catch(showError),
-  ));
-}
-
-async function saveContract(): Promise<void> {
-  const contract = await buildCurrentContract();
-  const text = await queryWorker<string>("serialize-contract", { contract }, sessionGeneration);
-  saveBlob(new Blob([text], { type: "application/json;charset=utf-8" }), `${contract.name}.contract.json`);
-}
-
-// Imports a saved contract into the current session: validates it against the
-// uploaded columns, then pre-fills every wizard step up to "Run comparison".
-async function loadContract(file: File): Promise<void> {
-  if (!state.left || !state.right) throw new AppError("SESSION_STATE", "upload both datasets before loading a contract");
-  const imported = await queryWorker<ImportedContract>("import-contract", { text: await file.text(), fileName: file.name }, sessionGeneration);
-  const { contract, wizard, summary } = imported;
-  if (!wizard) {
-    showContractSummary(contract, summary!, file.name);
-    return;
+  const max = Math.max(...fields.map((field) => field.mismatch_count));
+  const bars = node("div", "", "bars");
+  for (const field of fields) {
+    const active = state.view.field === field.field_name;
+    const row = button("", "bar-row", () => {
+      setView(active ? { field: null, pair: null } : { field: field.field_name, pair: null, filter: "differs" });
+      if (!active) void loadPatterns(field.field_name).catch((error) => showError(error, "results"));
+    });
+    row.setAttribute("aria-pressed", String(active));
+    const track = node("span", "", "bar-track");
+    const fill = node("span", "", "bar-fill");
+    fill.style.width = `${Math.max(2, (field.mismatch_count / max) * 100)}%`;
+    track.append(fill);
+    row.append(node("span", fieldLabel(field.field_name), "bar-name"), track, node("span", `${plural(field.mismatch_count, "row")} · ${percent(field.mismatch_count, field.comparison_count)}`, "bar-count"));
+    bars.append(row);
+    if (active) bars.append(patternsElement(field.field_name));
   }
-  hideContractSummary();
+  target.append(bars);
+}
 
-  invalidateResults();
-  for (const side of ["left", "right"] as const) {
-    const summary = state[side]!;
-    summary.name = contract[side].name;
-    const nameInput = document.querySelector<HTMLInputElement>(`#${side}-dataset input[type=text]`);
-    if (nameInput) nameInput.value = summary.name;
+function patternsElement(fieldName: string): HTMLElement {
+  const box = node("div", "", "patterns");
+  const patterns = state.patterns.get(fieldName);
+  if (!patterns) {
+    box.append(node("p", "Loading the most common differences…", "helper"));
+    return box;
   }
-  ($("#left-identity") as HTMLSelectElement).value = wizard.identity.left_column;
-  ($("#right-identity") as HTMLSelectElement).value = wizard.identity.right_column;
-  for (const input of identityNormalizerInputs()) input.checked = wizard.identity.normalize.includes(input.value as IdentityNormalizerName);
-  $("#identity-evidence").textContent = `Loaded contract '${contract.name}' from ${file.name}.`;
-  state.identity = wizard.identity;
-  state.fields = wizard.fields;
-  renderFieldRows();
-
-  state.pairs = wizard.fields
-    .filter((field) => field.mode === "Value mapping")
-    .map((field) => ({ field: { left_column: field.left_column, right_column: field.right_column }, rows: wizard.mappingRows.get(field.left_column) ?? [] }));
-  renderMappingEditorsFromState();
-  setProgress(reach("mappings"));
-
-  await confirmMappings();
-  ($("#contract-name") as HTMLInputElement).value = contract.name;
-}
-
-// A contract the wizard cannot represent (Custom normalizers) is shown
-// read-only and can be run as-is, skipping the wizard steps.
-function showContractSummary(contract: ReconciliationContract, summary: ContractSummary, fileName: string): void {
-  const panel = $("#contract-summary");
-  const title = node("h3", `Imported contract: ${summary.name}`);
-  const explanation = node("p", `${fileName} uses settings the wizard cannot edit (Custom normalizers). Review it, then run it as-is or discard it.`, "caption");
-  const identity = node("p", `Identity: ${summary.identity}`);
-  const table = renderTable(
-    [
-      { label: "Field", value: (row: ContractSummary["fields"][number]) => row.name },
-      { label: "Columns", value: (row) => row.columns },
-      { label: "Mode", value: (row) => row.mode },
-      { label: "Normalizers", value: (row) => row.normalizers },
-      { label: "Value mapping", value: (row) => row.mapping },
-    ],
-    summary.fields,
-    `Fields of contract ${summary.name}`,
-  );
-  const run = node("button", "Run this contract");
-  run.type = "button";
-  run.addEventListener("click", () => {
-    clearError();
-    runImportedContract(contract).catch(showError);
-  });
-  const discard = node("button", "Discard", "secondary");
-  discard.type = "button";
-  discard.addEventListener("click", () => {
-    hideContractSummary();
-    focusStep("identity");
-  });
-  const actions = node("div", "", "actions");
-  actions.append(run, discard);
-  panel.replaceChildren(title, explanation, identity, table, actions);
-  show("#contract-summary");
-}
-
-function hideContractSummary(): void {
-  $("#contract-summary").replaceChildren();
-  show("#contract-summary", false);
-}
-
-async function runImportedContract(contract: ReconciliationContract): Promise<void> {
-  if (!state.left || !state.right) throw new AppError("SESSION_STATE", "upload both datasets before running a contract");
-  state.left.name = contract.left.name;
-  state.right.name = contract.right.name;
-  setProgress(reach("identity"));
-  await runContract(contract, () => setProgress(reachSkipping("results", ["fields", "mappings", "run"])));
-}
-
-async function loadMatchingDetails(pageNumber: number): Promise<void> {
-  if (!state.result) return;
-  const resultId = state.result.resultId;
-  const page = await queryWorker<WorkerPage<FieldComparisonResult>>("matching-details", { page: pageNumber, pageSize: 100, resultId }, sessionGeneration);
-  if (!state.result) return;
-  $("#matching-summary").replaceChildren(resultDetailTable(page, "Matching comparisons", (nextPage) => loadMatchingDetails(nextPage).catch(showError)));
-}
-
-function renderMetrics(summary: ResultsSummary): void {
-  const target = $("#metrics");
-  target.replaceChildren();
-  for (const metric of metricTiles(summary)) {
-    const tile = node("div", "", "metric");
-    tile.dataset.tone = metric.tone;
-    tile.append(node("strong", String(metric.value)), node("span", metric.label));
-    target.append(tile);
-  }
-}
-
-function renderFieldSummary(rows: FieldMismatchSummary[]): void {
-  const target = $("#field-summary");
-  target.replaceChildren();
-  if (rows.length === 0) {
-    target.append(
-      node("p", "No field discrepancies were found.", "message"),
+  box.append(node("p", "Most common differences: choose one to see its rows", "helper"));
+  for (const pattern of patterns) {
+    const active = state.view.pair !== null && state.view.pair.left === pattern.left_value && state.view.pair.right === pattern.right_value;
+    const item = button("", "ghost pattern", () => setView({ pair: active ? null : { left: pattern.left_value, right: pattern.right_value } }));
+    item.setAttribute("aria-pressed", String(active));
+    item.append(
+      node("span", pattern.left_value === null ? "(empty)" : `“${pattern.left_value}”`, "mono"),
+      node("span", "→", "arrow"),
+      node("span", pattern.right_value === null ? "(empty)" : `“${pattern.right_value}”`, "mono"),
+      node("span", `${plural(pattern.employee_count, "row")}`, "times"),
     );
-    show("#pair-panel", false);
+    box.append(item);
+  }
+  return box;
+}
+
+async function loadPatterns(fieldName: string): Promise<void> {
+  if (!state.run || state.patterns.has(fieldName)) return;
+  const resultId = state.run.dashboard.resultId;
+  const page = await queryWorker<WorkerPage<PairMismatchSummary>>("pairs", { fieldName, page: 0, pageSize: 5, resultId }, session);
+  if (state.run?.dashboard.resultId !== resultId) return;
+  state.patterns.set(fieldName, page.rows);
+  renderColumnSummary();
+}
+
+function setView(change: Partial<ViewState>): void {
+  state.view = { ...state.view, page: 0, ...change };
+  renderKpis();
+  renderColumnSummary();
+  void loadRows().catch((error) => showError(error, "results"));
+}
+
+function renderChips(): void {
+  const target = $("#active-filters");
+  target.replaceChildren();
+  const view = state.view;
+  if (view.field) {
+    target.append(button(`Column: ${fieldLabel(view.field)}`, "chip", () => setView({ field: null, pair: null })));
+  }
+  if (view.pair) {
+    const shown = (value: string | null) => (value === null ? "(empty)" : `“${value}”`);
+    target.append(button(`${shown(view.pair.left)} → ${shown(view.pair.right)}`, "chip", () => setView({ pair: null })));
+  }
+  for (const chip of target.querySelectorAll("button")) chip.setAttribute("aria-label", `Remove filter ${chip.textContent}`);
+}
+
+const FILTER_WORDS: Record<RowFilter, string> = {
+  issues: "rows that need a look",
+  all: "rows",
+  match: "matching rows",
+  differs: "rows with differences",
+  only_a: "rows only in A",
+  only_b: "rows only in B",
+  warnings: "rows with duplicate or blank keys",
+};
+
+async function loadRows(): Promise<void> {
+  const run = state.run;
+  if (!run) return;
+  const generation = ++rowsGeneration;
+  const view = state.view;
+  const query: RowQuery = { filter: view.filter, field: view.field, pair: view.pair, search: view.search, page: view.page, pageSize: PAGE_SIZE };
+  const page = await queryWorker<ResultRowsPage>("result-rows", { query, resultId: run.dashboard.resultId }, session);
+  if (generation !== rowsGeneration) return;
+  renderChips();
+  const first = page.total === 0 ? 0 : page.page * page.pageSize + 1;
+  const last = Math.min(page.total, (page.page + 1) * page.pageSize);
+  $("#row-count").textContent = page.total === 0 ? "" : `Showing ${count(first)}–${count(last)} of ${count(page.total)} ${FILTER_WORDS[view.filter]}`;
+  renderTable(page);
+  renderPager(page);
+}
+
+function renderTable(page: ResultRowsPage): void {
+  const target = $("#results-table");
+  target.replaceChildren();
+  if (page.total === 0) {
+    const run = state.run!;
+    const clean = state.view.filter === "issues" && !state.view.search && !state.view.field;
+    const empty = node("div", "", clean ? "empty-state ok" : "empty-state");
+    if (clean) {
+      const inBoth = run.dashboard.rows.match + run.dashboard.rows.differs;
+      empty.append(node("span", "✓", "empty-icon"), node("p", `No differences: both files match on ${plural(inBoth, "row")}.`));
+    } else {
+      empty.append(node("p", "No rows match these filters."), button("Clear filters", "secondary small", () => {
+        ($("#search") as HTMLInputElement).value = "";
+        setView({ ...DEFAULT_VIEW });
+      }));
+    }
+    target.append(empty);
     return;
   }
+  const { a, b } = names();
+  const keyLabel = state.run!.contract.identity.left;
+  const table = node("table", "", "results");
+  table.append(node("caption", "Comparison results", "sr-only"));
+  const groupRow = node("tr");
+  const subRow = node("tr");
+  const statusHead = node("th", "Status", "sticky-1");
+  const keyHead = node("th", keyLabel, "sticky-2");
+  statusHead.rowSpan = 2;
+  keyHead.rowSpan = 2;
+  statusHead.scope = keyHead.scope = "col";
+  groupRow.append(statusHead, keyHead);
+  for (const column of page.columns) {
+    const group = node("th", column.left === column.right ? column.name : `${column.left} / ${column.right}`, "group");
+    group.colSpan = column.numeric ? 3 : 2;
+    group.scope = "colgroup";
+    groupRow.append(group);
+    const subA = node("th", "A", `sub-a group-start${column.numeric ? " num" : ""}`);
+    subA.title = `${column.left} in ${a}`;
+    const subB = node("th", "B", `sub-b${column.numeric ? " num" : ""}`);
+    subB.title = `${column.right} in ${b}`;
+    subRow.append(subA, subB);
+    if (column.numeric) {
+      const delta = node("th", "Δ B − A", "num");
+      delta.title = "Difference: value in B minus value in A";
+      subRow.append(delta);
+    }
+  }
+  const thead = node("thead");
+  thead.append(groupRow, subRow);
+  const tbody = node("tbody");
+  for (const row of page.rows) tbody.append(resultRowElement(row, page, a, b));
+  table.append(thead, tbody);
+  target.append(table);
+}
+
+function resultRowElement(row: ResultRow, page: ResultRowsPage, a: string, b: string): HTMLTableRowElement {
+  const tr = node("tr");
+  const statusCell = node("td", "", "sticky-1");
+  const badge = node("span", "", "badge");
+  badge.dataset.status = row.status;
+  const status = ROW_STATUS[row.status];
+  const label = row.side && (row.status === "duplicate" || row.status === "blank_key") ? `${status.label} in ${row.side.toUpperCase()}` : status.label;
+  badge.append(node("span", status.icon, "badge-icon"), label);
+  statusCell.append(badge);
+
+  const keyCell = node("td", "", "sticky-2 mono");
+  const identity = row.identity === null || row.identity.trim() === "" ? "(blank)" : row.identity;
+  keyCell.append(identity);
+  if (row.status === "duplicate" || row.status === "blank_key") {
+    const lines = row.side === "b" ? row.rightLines : row.leftLines;
+    keyCell.append(node("span", `${lines.length > 1 ? "rows" : "row"} ${lines.join(", ")} in ${row.side === "b" ? b : a}`, "key-lines"));
+  }
+  keyCell.title = [row.leftLines.length ? `Row ${row.leftLines.join(", ")} in ${a}` : "", row.rightLines.length ? `Row ${row.rightLines.join(", ")} in ${b}` : ""].filter(Boolean).join(" · ");
+  tr.append(statusCell, keyCell);
+
+  row.cells.forEach((cell, index) => {
+    const column = page.columns[index];
+    const changed = cell.state === "differs" || cell.state === "a_empty" || cell.state === "b_empty";
+    const absentA = row.status === "only_b" || ((row.status === "duplicate" || row.status === "blank_key") && row.side === "b");
+    const absentB = row.status === "only_a" || ((row.status === "duplicate" || row.status === "blank_key") && row.side === "a");
+    const valueClass = `${column.numeric ? "num" : "mono"}${changed ? " cell-diff" : ""}`;
+    const cellA = absentA ? valueCell(null, "group-start") : valueCell(cell.a, `group-start ${valueClass}`);
+    const cellB = absentB ? valueCell(null) : valueCell(cell.b, valueClass);
+    tr.append(cellA, cellB);
+    if (column.numeric) {
+      const delta = cell.delta !== null ? `${cell.delta.startsWith("-") ? "−" : "+"}${groupDigits(cell.delta.replace(/^-/, ""))}` : changed ? "≠" : "";
+      tr.append(node("td", delta, `num${changed ? " delta" : ""}`));
+    }
+  });
+  return tr;
+}
+
+function groupDigits(value: string): string {
+  const [integer, fraction] = value.split(".");
+  return `${integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${fraction ? `.${fraction}` : ""}`;
+}
+
+function pageButton(text: string, disabled: boolean, onClick: () => void): HTMLButtonElement {
+  const element = button(text, "secondary small", onClick);
+  element.disabled = disabled;
+  return element;
+}
+
+function renderPager(page: ResultRowsPage): void {
+  const target = $("#pager");
+  target.replaceChildren();
+  const pages = Math.ceil(page.total / page.pageSize);
+  if (pages <= 1) return;
   target.append(
-      renderTable(
-      [
-        { label: "Field", value: (row) => row.field_name },
-        { label: "Mismatches", value: (row) => row.mismatch_count },
-        { label: "Comparisons", value: (row) => row.comparison_count },
-        { label: "Rate %", value: (row) => row.mismatch_rate_percentage },
-      ],
-      rows,
-      "Mismatches by field",
-    ),
-  );
-
-  const fieldSelect = select(
-    rows.map((row) => row.field_name),
-    rows[0].field_name,
-  );
-  fieldSelect.id = "result-field";
-  $("#result-field").replaceWith(fieldSelect);
-  fieldSelect.addEventListener("change", () => loadPairs(0).catch(showError));
-  show("#pair-panel");
-  loadPairs(0).catch(showError);
-}
-
-function loadRemoteTable<T>(columns: TableColumn<T>[], page: WorkerPage<T>, label: string, onPage: (page: number) => void): HTMLDivElement {
-  const container = node("div", "", "paged-table");
-  container.append(node("p", `${label}: ${page.total.toLocaleString()} · page ${page.page + 1} of ${Math.max(1, Math.ceil(page.total / page.pageSize))}`, "caption"));
-  container.append(renderTable(columns, page.rows, label));
-  const controls = node("div", "", "actions");
-  const previous = node("button", "Previous page", "secondary");
-  previous.type = "button"; previous.disabled = page.page === 0;
-  previous.addEventListener("click", () => onPage(page.page - 1));
-  const next = node("button", "Next page", "secondary");
-  next.type = "button"; next.disabled = page.page + 1 >= Math.ceil(page.total / page.pageSize);
-  next.addEventListener("click", () => onPage(page.page + 1));
-  controls.append(previous, next);
-  container.append(controls);
-  return container;
-}
-
-async function loadPairs(pageNumber = 0): Promise<void> {
-  if (!state.result) return;
-  const field = ($("#result-field") as HTMLSelectElement).value;
-  const resultId = state.result.resultId;
-  const page = await queryWorker<WorkerPage<PairMismatchSummary>>("pairs", { fieldName: field, page: pageNumber, pageSize: 100, resultId }, sessionGeneration);
-  if (!state.result) return;
-  state.resultPairs = page.rows;
-  state.pairTotal = page.total;
-
-  $("#pair-summary").replaceChildren(
-    loadRemoteTable(
-      [
-        { label: "Dataset A value", value: (row) => display(row.left_value) },
-        { label: "Dataset B value", value: (row) => display(row.right_value) },
-        { label: "Status", value: (row) => row.status },
-        { label: "Employees", value: (row) => row.employee_count },
-        { label: "Share %", value: (row) => row.percentage },
-      ],
-      page,
-      "Mismatch pairs",
-      (nextPage) => loadPairs(nextPage).catch(showError),
-    ),
-  );
-
-  const pairSelect = node("select");
-  for (const { value, label } of pairOptions(page.rows)) {
-    const option = node("option", label);
-    option.value = value;
-    pairSelect.append(option);
-  }
-  pairSelect.id = "result-pair";
-  $("#result-pair").replaceWith(pairSelect);
-  pairSelect.addEventListener("change", () => loadDetails(0).catch(showError));
-  await loadDetails(0);
-}
-
-async function loadDetails(pageNumber = 0): Promise<void> {
-  if (!state.result) return;
-  const field = ($("#result-field") as HTMLSelectElement).value;
-  const selection = ($("#result-pair") as HTMLSelectElement).value;
-
-  let filterLeft = false;
-  let filterRight = false;
-  let leftVal: string | null = null;
-  let rightVal: string | null = null;
-
-  const pair = selectedPair(selection, state.resultPairs);
-  if (pair) {
-    filterLeft = true;
-    filterRight = true;
-    leftVal = pair.left_value;
-    rightVal = pair.right_value;
-  }
-
-  const page = await queryWorker<WorkerPage<FieldComparisonResult>>("details", {
-    fieldName: field, page: pageNumber, pageSize: 100,
-    resultId: state.result.resultId,
-    leftValue: leftVal,
-    rightValue: rightVal,
-    filterLeft,
-    filterRight,
-  }, sessionGeneration);
-
-  $("#detail-summary").replaceChildren(resultDetailTable(page, "Employee details", (nextPage) => loadDetails(nextPage).catch(showError)));
-}
-
-function resultDetailTable(page: WorkerPage<FieldComparisonResult>, label: string, onPage: (page: number) => void): HTMLDivElement {
-  return loadRemoteTable(
-    [
-      { label: "Employee identity", value: (row) => row.identity },
-      { label: "Field", value: (row) => row.fieldName },
-      { label: "Dataset A row", value: (row) => row.leftLine },
-      { label: "Dataset B row", value: (row) => row.rightLine },
-      { label: "Dataset A value", value: (row) => display(row.leftRawValue) },
-      { label: "Dataset B value", value: (row) => display(row.rightRawValue) },
-      { label: "Comparison status", value: (row) => row.status },
-    ],
-    page,
-    label,
-    onPage,
+    node("span", `Page ${count(page.page + 1)} of ${count(pages)}`),
+    pageButton("Previous", page.page === 0, () => { state.view.page--; void loadRows().catch((error) => showError(error, "results")); }),
+    pageButton("Next", page.page + 1 >= pages, () => { state.view.page++; void loadRows().catch((error) => showError(error, "results")); }),
   );
 }
 
-async function download(file: string): Promise<void> {
-  if (!state.result || !state.contract) {
-    showError(new AppError("SESSION_STATE", "run the reconciliation first"));
-    return;
-  }
-  const root = state.contract.name;
-  const filenames: Record<string, string> = { "full.csv": `${root}_full.csv`, "mismatches.csv": `${root}_mismatches.csv`, "report.json": `${root}.json` };
-  const filename = filenames[file];
-  if (!filename) return;
+const searchEdited = debounce(() => setView({ search: ($("#search") as HTMLInputElement).value }), 250);
 
-  // The worker streams the export into a Blob; no report-sized string reaches this thread.
+// ---------- Export ----------
+
+const EXPORT_FILES: Record<ExportFormat, string> = {
+  "differences.csv": "differences.csv",
+  "comparison.csv": "comparison.csv",
+  "report.html": "report.html",
+  "summary.txt": "summary.txt",
+  "report.json": "audit.json",
+  "full.csv": "raw_results.csv",
+  "mismatches.csv": "raw_differences.csv",
+};
+
+async function exportBlob(format: ExportFormat): Promise<Blob> {
+  if (!state.run) throw new AppError("SESSION_STATE", "compare the files first");
   const excelSafe = ($("#excel-safe") as HTMLInputElement).checked;
-  const blob = await queryWorker<Blob>("export", { format: file, resultId: state.result.resultId, excelSafe }, sessionGeneration);
-  saveBlob(blob, filename);
+  return queryWorker<Blob>("export", { format, resultId: state.run.dashboard.resultId, excelSafe }, session);
+}
+
+async function download(format: ExportFormat): Promise<void> {
+  const blob = await exportBlob(format);
+  const name = `${state.run!.contract.name}_${EXPORT_FILES[format]}`;
+  saveBlob(blob, name);
+  toast(`Downloaded ${name}${state.stale ? " (from the results before your latest settings change)" : ""}`);
+}
+
+async function copySummary(): Promise<void> {
+  const text = await (await exportBlob("summary.txt")).text();
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Clipboard API unavailable (some file:// contexts): fall back to a selection copy.
+    const area = node("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.append(area);
+    area.select();
+    const copied = document.execCommand("copy");
+    area.remove();
+    if (!copied) throw new AppError("UNKNOWN", "the browser blocked copying; use the printable report instead");
+  }
+  toast("Summary copied to the clipboard");
 }
 
 function saveBlob(blob: Blob, filename: string): void {
@@ -1037,185 +1249,228 @@ function saveBlob(blob: Blob, filename: string): void {
   }, 30000);
 }
 
-function clearSession(): void {
-  sessionGeneration++;
-  runGeneration++;
+function setupExportMenu(): void {
+  const toggle = $<HTMLButtonElement>("#export-toggle");
+  const panel = $("#export-panel");
+  const items = () => Array.from(panel.querySelectorAll<HTMLButtonElement>(".menu-item"));
+  const setOpen = (open: boolean, focusToggle = false) => {
+    panel.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    if (open) items()[0]?.focus();
+    else if (focusToggle) toggle.focus();
+  };
+  toggle.addEventListener("click", () => setOpen(panel.hidden));
+  document.addEventListener("click", (event) => {
+    if (!panel.hidden && !$("#export-menu").contains(event.target as Node)) setOpen(false);
+  });
+  panel.addEventListener("keydown", (event) => {
+    const list = items();
+    const at = list.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === "Escape") setOpen(false, true);
+    else if (event.key === "ArrowDown") { event.preventDefault(); list[(at + 1) % list.length].focus(); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); list[(at - 1 + list.length) % list.length].focus(); }
+  });
+  for (const item of items()) {
+    item.addEventListener("click", () => {
+      setOpen(false);
+      const task = item.dataset.action === "copy-summary" ? copySummary() : download(item.dataset.export as ExportFormat);
+      task.catch((error) => showError(error, "results"));
+    });
+  }
+}
+
+// ---------- Saved settings ----------
+
+async function saveSettings(): Promise<void> {
+  const contract = state.imported ? state.imported.contract : await buildContract();
+  const text = await queryWorker<string>("serialize-contract", { contract }, session);
+  const name = `${contract.name}.settings.json`;
+  saveBlob(new Blob([text], { type: "application/json;charset=utf-8" }), name);
+  toast(`Saved ${name}. Load it next time to reuse these settings.`);
+}
+
+async function loadSettings(file: File): Promise<void> {
+  if (!state.files.left || !state.files.right) throw new AppError("SESSION_STATE", "load both files before loading saved settings");
+  clearMessages("settings");
+  const imported = await queryWorker<ImportedContract>("import-contract", { text: await file.text(), fileName: file.name }, session);
+  setupGeneration++;
+  invalidateRun();
+  const { contract, wizard, summary } = imported;
+  state.files.left.summary.name = contract.left.name;
+  state.files.right.summary.name = contract.right.name;
+  renderFile("left");
+  renderFile("right");
+  if (!wizard) {
+    state.imported = { contract, summary: summary!, fileName: file.name };
+    renderImported();
+    return;
+  }
+  state.imported = null;
+  $("#imported-summary").hidden = true;
+  $("#wizard").hidden = false;
+  state.key = { left: wizard.identity.left_column, right: wizard.identity.right_column, normalize: [...wizard.identity.normalize] };
+  renderKeySelects();
+  state.keyStats = await queryWorker<IdentityOptionsSuggestion>("identity-options", { leftColumn: state.key.left, rightColumn: state.key.right }, session);
+  state.keyAuto = null;
+  for (const input of keyOptionInputs()) input.checked = state.key.normalize.includes(input.value as IdentityNormalizerName);
+  renderKeyEvidence();
+  state.columns = wizard.fields.map((field) => ({
+    id: nextColumnId++,
+    include: true,
+    left_column: field.left_column,
+    right_column: field.right_column,
+    mode: field.mode,
+    format: field.format,
+    tolerance: field.tolerance,
+    suggestion: null,
+    pairReason: null,
+    remembered: false,
+    mapping: field.mode === "Value mapping" ? { rows: wizard.mappingRows.get(field.left_column) ?? [], loaded: true, page: 0 } : null,
+  }));
+  renderColumns();
+  showMessage("settings", { tone: "ok", title: `Loaded the settings from ${file.name}.`, detail: "Check them below, then compare.", dismissible: true });
+}
+
+// Saved settings with custom rules the screen cannot edit are shown read-only
+// and can be run as they are.
+function renderImported(): void {
+  const imported = state.imported!;
+  const panel = $("#imported-summary");
+  const table = node("table");
+  const head = node("tr");
+  for (const label of ["Column", "Columns", "Compared", "Rules", "Translations"]) head.append(node("th", label));
+  const thead = node("thead");
+  thead.append(head);
+  const tbody = node("tbody");
+  for (const field of imported.summary.fields) {
+    const row = node("tr");
+    for (const value of [field.name, field.columns, field.mode, field.normalizers, field.mapping]) row.append(node("td", value));
+    tbody.append(row);
+  }
+  table.append(thead, tbody);
+  const wrapper = node("div", "", "table-card");
+  wrapper.append(table);
+  panel.replaceChildren(
+    node("h3", `Saved settings: ${imported.summary.name}`),
+    node("p", `${imported.fileName} uses custom rules that can't be edited here. Rows are matched on ${imported.summary.identity}. Compare with these settings as they are, or discard them.`, "helper"),
+    wrapper,
+    button("Discard these settings", "secondary small", () => {
+      state.imported = null;
+      void setupSettings().catch((error) => showError(error, "settings"));
+    }),
+  );
+  panel.hidden = false;
+  $("#wizard").hidden = true;
+  renderCompareSummary();
+}
+
+// ---------- Start over ----------
+
+function startOver(): void {
+  session++;
+  setupGeneration++;
   terminateReconciliationWorker();
   uploadGeneration.left++;
   uploadGeneration.right++;
   for (const url of downloadUrls) URL.revokeObjectURL(url);
   downloadUrls.clear();
-  state.left = null;
-  state.right = null;
-  state.identity = null;
-  state.fields = [];
-  state.pairs = [];
-  state.contract = null;
-  state.result = null;
-  state.resultPairs = [];
-
-  $("#left-dataset").replaceChildren();
-  $("#right-dataset").replaceChildren();
-  for (const selector of ["#identity-suggestion", "#identity-evidence", "#field-rows", "#mapping-editors", "#run-summary", "#metrics", "#identity-issues", "#field-summary", "#pair-summary", "#detail-summary", "#matching-summary"]) {
-    $(selector).replaceChildren();
-  }
-  ($( "#contract-name") as HTMLInputElement).value = "";
-  ($( "#left-identity") as HTMLSelectElement).replaceChildren();
-  ($( "#right-identity") as HTMLSelectElement).replaceChildren();
-  ($( "#result-field") as HTMLSelectElement).replaceChildren();
-  ($( "#result-pair") as HTMLSelectElement).replaceChildren();
-  for (const input of identityNormalizerInputs()) input.checked = false;
+  state.files = { left: null, right: null };
+  resetSettings();
+  state.key = { left: "", right: "", normalize: [] };
+  for (const input of keyOptionInputs()) input.checked = false;
+  ($("#key-options") as HTMLDetailsElement).open = false;
   ($("#excel-safe") as HTMLInputElement).checked = true;
-  chosenFiles.left = null;
-  chosenFiles.right = null;
-  ($("#left-encoding") as HTMLSelectElement).value = "utf-8";
-  ($("#right-encoding") as HTMLSelectElement).value = "utf-8";
-  ($("#contract-file") as HTMLInputElement).value = "";
-  ($("#left-file") as HTMLInputElement).value = "";
-  ($("#right-file") as HTMLInputElement).value = "";
-
-  invalidateAfterUpload();
-  hideContractSummary();
-  setProgress(INITIAL_PROGRESS);
-  clearError();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  ($("#search") as HTMLInputElement).value = "";
+  renderFile("left");
+  renderFile("right");
+  clearMessages("load");
+  updateSteps();
+  window.scrollTo({ top: 0 });
+  $("#step-load-title").focus({ preventScroll: true });
 }
 
-function quitApplication(): void {
-  clearSession();
-  document.body.replaceChildren();
-  const message = node("main");
-  message.append(
-    node("h1", "HRIS Reconciliation has closed"),
-    node(
-      "p",
-      "Application references and displayed data have been cleared. You can safely close this tab.",
-    ),
-  );
-  document.body.append(message);
-}
+// ---------- Wiring ----------
 
-function setupDragAndDrop(side: "left" | "right"): void {
-  const card = $(`#${side}-card`);
-  card.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    card.classList.add("drag-over");
-  });
-  card.addEventListener("dragleave", () => {
-    card.classList.remove("drag-over");
-  });
-  card.addEventListener("drop", (e) => {
-    e.preventDefault();
-    card.classList.remove("drag-over");
-    const file = e.dataTransfer?.files[0];
-    if (file) {
-      upload(side, file).catch(showError);
-    }
-  });
-}
-
-function bind(
-  selector: string,
-  event: string,
-  callback: (...args: unknown[]) => unknown,
-): void {
-  $(selector).addEventListener(event, (...args: unknown[]) => {
-    clearError();
+function guarded(area: Area, action: () => unknown): () => void {
+  return () => {
     try {
-      const res = callback(...args);
-      if (res instanceof Promise) {
-        res.catch(showError);
-      }
-    } catch (err) {
-      showError(err);
+      const result = action();
+      if (result instanceof Promise) result.catch((error) => showError(error, area));
+    } catch (error) {
+      showError(error, area);
     }
+  };
+}
+
+setupDropzone("left");
+setupDropzone("right");
+setupExportMenu();
+
+for (const input of keyOptionInputs()) {
+  input.addEventListener("change", () => {
+    state.key.normalize = keyOptionInputs().filter((item) => item.checked).map((item) => item.value as IdentityNormalizerName);
+    state.keyAuto = null;
+    renderKeyEvidence();
+    settingsChanged();
   });
 }
 
-// Bind events
-const leftFileInput = $("#left-file") as HTMLInputElement;
-const rightFileInput = $("#right-file") as HTMLInputElement;
-
-leftFileInput.addEventListener("change", (e) => {
-  const files = (e.target as HTMLInputElement).files;
-  if (files && files[0]) upload("left", files[0]).catch(showError);
+$("#select-all").addEventListener("click", () => {
+  for (const row of state.columns) row.include = true;
+  renderColumns();
+  settingsChanged();
+  for (const row of state.columns) if (row.mode === "Value mapping" && !row.mapping) void loadMapping(row).catch((error) => showError(error, "settings"));
 });
-
-rightFileInput.addEventListener("change", (e) => {
-  const files = (e.target as HTMLInputElement).files;
-  if (files && files[0]) upload("right", files[0]).catch(showError);
+$("#select-none").addEventListener("click", () => {
+  for (const row of state.columns) row.include = false;
+  renderColumns();
+  settingsChanged();
 });
-
-for (const input of identityNormalizerInputs()) {
-  input.addEventListener("change", () => { void scoreIdentity("identity-normalizers").catch(showError); });
-}
-
-$("#contract-file").addEventListener("change", (event) => {
+$("#add-pair").addEventListener("click", guarded("settings", addPair));
+$("#compare").addEventListener("click", guarded("settings", compare));
+$("#save-settings").addEventListener("click", guarded("settings", saveSettings));
+$("#settings-file").addEventListener("change", (event) => {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = "";
-  clearError();
-  if (file) loadContract(file).catch(showError);
+  if (file) loadSettings(file).catch((error) => showError(error, "settings"));
+});
+$("#start-over").addEventListener("click", startOver);
+$("#search").addEventListener("input", () => searchEdited.schedule());
+$("#search").addEventListener("change", () => searchEdited.flush());
+
+// "/" focuses the search box, as in most data tools.
+document.addEventListener("keydown", (event) => {
+  const target = event.target as HTMLElement;
+  if (event.key !== "/" || !state.run || target.closest("input, textarea, select, [contenteditable]")) return;
+  event.preventDefault();
+  $("#search").focus();
 });
 
-// While worker requests are pending: show progress, mark the workbench busy,
-// and disable its action buttons (header controls such as Clear session stay
-// usable, so a slow run can always be abandoned).
+// Progress shows only for work that takes a moment, so quick filter
+// changes don't flash it. Compare stays disabled while settings are computed.
+let progressTimer = 0;
 onBusyChange((pendingTypes) => {
   const label = busyLabel(pendingTypes);
-  const main = $("main");
-  show("#busy", label !== null);
-  $("#busy-label").textContent = label ?? "";
-  if (label) {
-    main.setAttribute("aria-busy", "true");
-    for (const button of main.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")) {
-      button.disabled = true;
-      button.dataset.busyDisabled = "true";
-    }
-  } else {
-    main.removeAttribute("aria-busy");
-    for (const button of main.querySelectorAll<HTMLButtonElement>("button[data-busy-disabled]")) {
-      button.disabled = false;
-      delete button.dataset.busyDisabled;
-    }
-  }
+  window.clearTimeout(progressTimer);
+  const apply = () => {
+    $("#progress").hidden = label === null;
+    $("#progress-text").textContent = label ?? "";
+  };
+  if (label === null) apply();
+  else progressTimer = window.setTimeout(apply, 200);
+  $("main").setAttribute("aria-busy", String(label !== null));
+  const settingUp = pendingTypes.some((type) => ["suggest-identity", "identity-options", "suggest-fields", "suggest-modes", "build-contract", "reconcile", "parse"].includes(type));
+  $<HTMLButtonElement>("#compare").disabled = settingUp;
 });
 
-// The worker held every dataset and result, so the whole session is gone:
-// reset the UI to step 1 instead of leaving steps that would fail with
-// "upload first".
+// The worker held every dataset and result, so the whole session is gone.
 onWorkerCrash((error) => {
-  clearSession();
-  showError(error);
+  startOver();
+  showError(error, "load");
 });
 
-for (const side of ["left", "right"] as const) {
-  $(`#${side}-encoding`).addEventListener("change", () => {
-    const file = chosenFiles[side];
-    if (file) upload(side, file, `${side}-encoding`).catch(showError);
-  });
-}
-
-setupDragAndDrop("left");
-setupDragAndDrop("right");
-setProgress(INITIAL_PROGRESS);
-
-bind("#confirm-identity", "click", confirmIdentity);
-bind("#add-field", "click", addField);
-bind("#confirm-fields", "click", confirmFields);
-bind("#confirm-mappings", "click", confirmMappings);
-bind("#run-reconciliation", "click", runReconciliation);
-bind("#save-contract", "click", saveContract);
-bind("#clear-session", "click", clearSession);
-bind("#quit-application", "click", quitApplication);
-
-document.querySelectorAll<HTMLButtonElement>(".download").forEach((btn) => {
-  const file = btn.dataset.file;
-  if (file) {
-    btn.addEventListener("click", () => download(file).catch(showError));
-  }
-});
-
-$("#matching-details").addEventListener("toggle", (event) => {
-  if ((event.currentTarget as HTMLDetailsElement).open) loadMatchingDetails(0).catch(showError);
-});
+$("#app-version").textContent = `· v${APP_VERSION}`;
+renderFile("left");
+renderFile("right");
+updateSteps();

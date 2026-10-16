@@ -3,6 +3,7 @@ import ReconciliationWorker from "./reconciliation.worker?worker&inline";
 import { CsvEncoding } from "./analysis/csv";
 import { ColumnProfile } from "./analysis/profiling";
 import { FieldMismatchSummary, ResultsSummary } from "./analysis/results_analysis";
+import type { FixHint, RowCounts } from "./analysis/result_rows";
 import { DatasetSummary, ReconciliationContract } from "./core/types";
 
 interface PendingRequest {
@@ -15,7 +16,9 @@ interface PendingRequest {
 
 export interface ReconciliationDashboard {
   summary: ResultsSummary;
+  rows: RowCounts;
   fields: FieldMismatchSummary[];
+  hints: FixHint[];
   matchingCount: number;
   resultId: number;
 }
@@ -124,7 +127,11 @@ export function reconcileInWorker(options: {
   return requestWorker("reconcile", payload, sessionGeneration);
 }
 
-export function queryWorker<T>(type: "pairs" | "details" | "matching-details" | "identity-issues" | "export" | "suggest-identity" | "score-identity" | "mapping-evidence" | "suggest-fields" | "build-contract" | "import-contract" | "serialize-contract", options: Record<string, unknown>, sessionGeneration: number): Promise<T> {
+export type QueryType =
+  | "pairs" | "result-rows" | "export" | "suggest-identity" | "identity-options" | "suggest-modes" | "mapping-evidence"
+  | "suggest-fields" | "build-contract" | "import-contract" | "serialize-contract";
+
+export function queryWorker<T>(type: QueryType, options: Record<string, unknown>, sessionGeneration: number): Promise<T> {
   return requestWorker(type, options, sessionGeneration);
 }
 

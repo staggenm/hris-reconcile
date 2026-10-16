@@ -13,6 +13,7 @@ import {
   MappingConfig,
   NormalizerName,
   ReconciliationContract,
+  ValueFormat,
 } from "./types";
 
 // The saved/imported contract format, also embedded in the JSON report.
@@ -33,16 +34,31 @@ export interface ContractDocument {
     mode: FieldMode;
     normalize: NormalizerName[];
     value_mapping: string | null;
+    tolerance?: number;
   }>;
   value_mappings: Record<string, MappingConfig>;
 }
 
 // The wizard mode a field corresponds to; "Custom" if the wizard cannot express it.
+const FORMAT_CHAINS: Record<string, { mode: FieldMode; format: ValueFormat }> = {
+  number: { mode: "Number", format: "decimal_point" },
+  number_decimal_comma: { mode: "Number", format: "decimal_comma" },
+  date_dmy: { mode: "Date", format: "dmy" },
+  date_mdy: { mode: "Date", format: "mdy" },
+};
+
 export function fieldMode(field: FieldConfig): FieldMode {
   const chain = field.normalize.join(",");
   if (field.valueMapping) return chain === "" ? "Value mapping" : "Custom";
   if (chain === "") return "Exact";
+  if (Object.prototype.hasOwnProperty.call(FORMAT_CHAINS, chain)) return FORMAT_CHAINS[chain].mode;
   return chain === NORMALIZED_TEXT_CHAIN.join(",") ? "Normalized text" : "Custom";
+}
+
+// The Number or Date format a field uses, if any.
+export function fieldFormat(field: FieldConfig): ValueFormat | undefined {
+  const chain = field.normalize.join(",");
+  return Object.prototype.hasOwnProperty.call(FORMAT_CHAINS, chain) && !field.valueMapping ? FORMAT_CHAINS[chain].format : undefined;
 }
 
 export function serializeContract(contract: ReconciliationContract): ContractDocument {
@@ -59,6 +75,8 @@ export function serializeContract(contract: ReconciliationContract): ContractDoc
       mode: fieldMode(field),
       normalize: [...field.normalize],
       value_mapping: field.valueMapping ?? null,
+      // Only written when set, so contracts without tolerances hash as before.
+      ...(field.tolerance ? { tolerance: field.tolerance } : {}),
     })),
     value_mappings: contract.valueMappings,
   };
@@ -118,6 +136,13 @@ export function parseContractDocument(input: unknown): ReconciliationContract {
     const valueMapping = raw.value_mapping ?? null;
     if (valueMapping !== null && typeof valueMapping !== "string") throw invalid(`contract document: field '${raw.name}' 'value_mapping' must be a name or null`);
     const field: FieldConfig = { name: raw.name, left: raw.left, right: raw.right, normalize: normalize as NormalizerName[], valueMapping };
+    if (raw.tolerance !== undefined) {
+      if (typeof raw.tolerance !== "number" || !Number.isFinite(raw.tolerance) || raw.tolerance <= 0) {
+        throw invalid(`contract document: field '${raw.name}' 'tolerance' must be a positive number`);
+      }
+      if (fieldMode(field) !== "Number") throw invalid(`contract document: field '${raw.name}' has a tolerance but is not a Number field`);
+      field.tolerance = raw.tolerance;
+    }
     if (valueMapping !== null) {
       const mapping = valueMappings[valueMapping];
       if (!mapping) throw new AppError("MAPPING_NOT_FOUND", `value mapping '${valueMapping}' not found`);
@@ -156,7 +181,7 @@ export function validateContractColumns(contract: ReconciliationContract, leftCo
 
 export interface WizardState {
   identity: { left_column: string; right_column: string; normalize: IdentityNormalizerName[] };
-  fields: Array<{ left_column: string; right_column: string; mode: ComparisonMode }>;
+  fields: Array<{ left_column: string; right_column: string; mode: ComparisonMode; format?: ValueFormat; tolerance?: number }>;
   // Accepted editor rows per value-mapping field (keyed by left column).
   mappingRows: Map<string, MappingEditorRow[]>;
 }
@@ -179,7 +204,12 @@ export function wizardStateFromContract(contract: ReconciliationContract): Wizar
       }
       mappingRows.set(field.left, rows);
     }
-    return { left_column: field.left, right_column: field.right, mode };
+    const format = fieldFormat(field);
+    return {
+      left_column: field.left, right_column: field.right, mode,
+      ...(format ? { format } : {}),
+      ...(field.tolerance ? { tolerance: field.tolerance } : {}),
+    };
   });
   return {
     identity: { left_column: contract.identity.left, right_column: contract.identity.right, normalize: [...(contract.identity.normalize ?? [])] },

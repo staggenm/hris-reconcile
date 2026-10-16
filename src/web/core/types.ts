@@ -51,7 +51,10 @@ export type FieldComparisonStatus =
   | "unmapped_right"
   | "mismatch";
 
-export type ComparisonMode = "Exact" | "Normalized text" | "Value mapping" | "Ignore";
+export type ComparisonMode = "Exact" | "Normalized text" | "Number" | "Date" | "Value mapping" | "Ignore";
+
+// How Number and Date fields read their values.
+export type ValueFormat = "decimal_point" | "decimal_comma" | "dmy" | "mdy";
 
 export type NormalizerName =
   | "nfc"
@@ -59,7 +62,11 @@ export type NormalizerName =
   | "uppercase"
   | "lowercase"
   | "casefold"
-  | "collapse_whitespace";
+  | "collapse_whitespace"
+  | "number"
+  | "number_decimal_comma"
+  | "date_dmy"
+  | "date_mdy";
 
 // Opt-in identity key normalizers. Identity matching is exact by default.
 export type IdentityNormalizerName = "trim" | "strip_leading_zeros" | "casefold";
@@ -78,6 +85,8 @@ export interface FieldConfig {
   right: string;
   normalize: NormalizerName[];
   valueMapping?: string | null;
+  // Number fields only: values whose difference is at most this much match.
+  tolerance?: number;
 }
 
 export interface ReconciliationContract {
