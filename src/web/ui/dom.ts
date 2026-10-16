@@ -11,6 +11,12 @@ export function node<K extends keyof HTMLElementTagNameMap>(tag: K, text = "", c
   const element = document.createElement(tag);
   if (text !== "") element.textContent = text;
   if (className) element.className = className;
+  // Form controls never feed browser autofill, form-state restore or
+  // cloud spellcheck with data values.
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    element.autocomplete = "off";
+    element.spellcheck = false;
+  }
   return element;
 }
 

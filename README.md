@@ -30,6 +30,37 @@ to disk if a user downloads an export.
 Treat downloaded reports and source files according to the sensitivity of the
 data they contain.
 
+## Security and privacy
+
+What the file guarantees:
+
+- **No network.** A Content Security Policy blocks every connection (fetch,
+  XHR, WebSocket, beacons, images, frames, form posts), including from the
+  processing worker. There is no code that sends data anywhere.
+- **No local copies.** Data lives only in the tab's memory. Nothing is written
+  to browser storage (no localStorage, IndexedDB, caches or cookies); inputs
+  have autofill, form-state restore and spellcheck turned off; page
+  translation is disabled; a file dropped outside the drop zones is ignored.
+  "Start over" or closing the tab discards everything. Files reach the disk
+  only when the operator downloads an export or saved settings.
+- **No injection.** File contents are only ever displayed as text; exported
+  CSVs neutralize spreadsheet formulas by default; the HTML report contains
+  no scripts and has its own blocking policy.
+
+What the operator's environment must provide, because no web page can
+control it:
+
+- Only use a browser without extensions that are allowed to access file
+  URLs (in Chrome and Edge this is off by default; it can be enforced by policy).
+- Disable crash-report uploads and cloud spellcheck/translation by browser
+  policy where data rules require it.
+- Treat exports like the source files: the Downloads folder, Excel's
+  AutoRecover, printing and the clipboard ("Copy summary" contains counts and
+  column names, not row values) create copies outside the browser.
+- Distribute the HTML from a trusted, read-only location. If the file is
+  altered, these guarantees no longer hold; publish its SHA-256 alongside it
+  (`shasum -a 256 dist/hris-reconcile.html`).
+
 ## Build from source
 
 Requires Node.js 24.21.0 and npm.

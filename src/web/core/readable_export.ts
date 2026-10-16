@@ -218,8 +218,10 @@ export function htmlReportChunks(index: ResultIndex, metadata: ReportMetadata): 
   const e = escapeHtml;
   return batched((function* () {
     const clean = counts.differs + counts.only_a + counts.only_b + counts.duplicate + counts.blank_key === 0;
-    yield `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`;
-    yield `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">`;
+    // The report holds payroll data too: no scripts, no network, no page translation.
+    yield `<!doctype html><html lang="en" translate="no"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`;
+    yield `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">`;
+    yield `<meta name="referrer" content="no-referrer"><meta name="google" content="notranslate">`;
     yield `<title>${e(`${names.a} vs ${names.b}: reconciliation report`)}</title><style>${REPORT_CSS}</style></head><body><main>`;
     yield `<h1>${e(names.a)} <span style="color:var(--a)">(A)</span> vs ${e(names.b)} <span style="color:var(--b)">(B)</span></h1>`;
     yield `<p class="sub">Reconciliation report · ${e(localTimestamp(metadata.generatedAt))} · matched on ${e(keyRule(contract))}</p>`;

@@ -1,9 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no" spellcheck="false">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
+  <!-- Payroll data must never leave the machine: no browser page translation (sends page text to a cloud service). -->
+  <meta name="google" content="notranslate">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; img-src data:; child-src 'none'; frame-src 'none';">
   <title>HRIS Reconcile</title>
   <!-- source-only-guard: removed from production builds by vite.config.ts -->
@@ -51,7 +53,7 @@
             <button type="button" class="menu-item" data-export="report.json"><strong>Audit report (JSON)</strong><span>Settings, file fingerprints and every difference</span></button>
             <button type="button" class="menu-item" data-export="full.csv"><strong>Raw results (CSV)</strong><span>Machine-readable, every comparison</span></button>
             <button type="button" class="menu-item" data-export="mismatches.csv"><strong>Raw differences (CSV)</strong><span>Machine-readable, differences only</span></button>
-            <label class="menu-check"><input id="excel-safe" type="checkbox" checked>Protect CSV cells from spreadsheet formulas</label>
+            <label class="menu-check"><input autocomplete="off" id="excel-safe" type="checkbox" checked>Protect CSV cells from spreadsheet formulas</label>
           </div>
         </div>
       </div>
@@ -73,7 +75,7 @@
             <span>Drop a CSV file here, or <span class="link">browse</span></span>
           </div>
           <div class="dz-loaded" hidden></div>
-          <input id="left-file" class="sr-only" type="file" accept=".csv,text/csv" tabindex="-1">
+          <input autocomplete="off" id="left-file" class="sr-only" type="file" accept=".csv,text/csv" tabindex="-1">
         </div>
         <div id="drop-right" class="dropzone" data-side="b">
           <span class="file-chip b">File B</span>
@@ -82,7 +84,7 @@
             <span>Drop a CSV file here, or <span class="link">browse</span></span>
           </div>
           <div class="dz-loaded" hidden></div>
-          <input id="right-file" class="sr-only" type="file" accept=".csv,text/csv" tabindex="-1">
+          <input autocomplete="off" id="right-file" class="sr-only" type="file" accept=".csv,text/csv" tabindex="-1">
         </div>
       </div>
     </section>
@@ -107,9 +109,9 @@
               <summary>Matching options</summary>
               <fieldset class="checks">
                 <legend class="sr-only">How keys are matched</legend>
-                <label><input type="checkbox" value="trim">Ignore spaces around keys</label>
-                <label><input type="checkbox" value="strip_leading_zeros">Ignore leading zeros (00123 = 123)</label>
-                <label><input type="checkbox" value="casefold">Ignore capitals (ab12 = AB12)</label>
+                <label><input autocomplete="off" type="checkbox" value="trim">Ignore spaces around keys</label>
+                <label><input autocomplete="off" type="checkbox" value="strip_leading_zeros">Ignore leading zeros (00123 = 123)</label>
+                <label><input autocomplete="off" type="checkbox" value="casefold">Ignore capitals (ab12 = AB12)</label>
               </fieldset>
             </details>
           </div>
@@ -129,7 +131,7 @@
           <span id="compare-summary" class="helper"></span>
           <span class="spacer"></span>
           <button id="save-settings" class="ghost" type="button">Save settings</button>
-          <label class="ghost file-button">Load saved settings<input id="settings-file" class="sr-only" type="file" accept=".json,application/json"></label>
+          <label class="ghost file-button">Load saved settings<input autocomplete="off" id="settings-file" class="sr-only" type="file" accept=".json,application/json"></label>
         </div>
       </div>
     </section>

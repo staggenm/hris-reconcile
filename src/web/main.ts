@@ -1404,6 +1404,10 @@ function guarded(area: Area, action: () => unknown): () => void {
 
 setupDropzone("left");
 setupDropzone("right");
+// A file dropped outside the drop zones must not be handled by the browser:
+// it would open the file in this tab (ending the session) or save a copy to
+// the Downloads folder.
+for (const type of ["dragover", "drop"] as const) document.addEventListener(type, (event) => event.preventDefault());
 setupExportMenu();
 
 for (const input of keyOptionInputs()) {
