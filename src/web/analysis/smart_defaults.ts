@@ -125,29 +125,46 @@ function matchesWith(pairs: Array<[string, string]>, candidate: Candidate): { co
   return { count, example };
 }
 
-// Low-cardinality fields whose differing values pair up consistently
-// ("F" always opposite "Female") are code translations.
+// Share of rows whose value faces its most common partner, in the weaker of
+// the two directions: 1 for a perfect translation, lower for noise.
+function translationAgreement(pairs: Array<[string, string]>): number {
+  const direction = (from: 0 | 1) => {
+    const groups = new Map<string, Map<string, number>>();
+    for (const pair of pairs) {
+      const targets = groups.get(pair[from]) ?? new Map<string, number>();
+      targets.set(pair[1 - from], (targets.get(pair[1 - from]) ?? 0) + 1);
+      groups.set(pair[from], targets);
+    }
+    let dominant = 0;
+    for (const targets of groups.values()) dominant += Math.max(...targets.values());
+    return dominant / pairs.length;
+  };
+  return Math.min(direction(0), direction(1));
+}
+
+// Low-cardinality fields whose values pair up consistently ("F" opposite
+// "Female", "G6" opposite "6") are code translations. A few genuine
+// differences don't hide the pattern.
 function looksLikeCodeTranslation(pairs: Array<[string, string]>): [string, string] | null {
   const leftValues = new Set(pairs.map(([left]) => left));
   const rightValues = new Set(pairs.map(([, right]) => right));
   if (leftValues.size > 50 || rightValues.size > 50 || pairs.length < 4) return null;
+  if (translationAgreement(pairs) < 0.8) return null;
   const counts = new Map<string, number>();
   for (const [left, right] of pairs) {
+    if (left === right) continue;
     const key = JSON.stringify([left, right]);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  const perLeft = new Map<string, number>();
-  for (const [left] of pairs) perLeft.set(left, (perLeft.get(left) ?? 0) + 1);
-  let consistent = 0;
   let example: [string, string] | null = null;
+  let best = 1;
   for (const [key, count] of counts) {
-    const [left, right] = JSON.parse(key) as [string, string];
-    if (count >= 2 && count / perLeft.get(left)! >= 0.95) {
-      consistent += count;
-      if (left !== right) example ??= [left, right];
+    if (count > best) {
+      best = count;
+      example = JSON.parse(key) as [string, string];
     }
   }
-  return example && consistent / pairs.length >= 0.8 ? example : null;
+  return example;
 }
 
 function suggestMode(leftColumn: string, rightColumn: string, pairs: Array<[string, string]>): ModeSuggestion {
@@ -268,18 +285,7 @@ function contentAgreement(pairs: Array<[string, string]>): { score: number; tran
   }
   if (best >= CONTENT_PAIR_THRESHOLD || leftDistinct > 50 || rightDistinct > 50) return { score: best, translated: false };
   // Translation: each value on one side almost always faces the same value on the other.
-  const consistency = (from: 0 | 1) => {
-    const groups = new Map<string, Map<string, number>>();
-    for (const pair of pairs) {
-      const targets = groups.get(pair[from]) ?? new Map<string, number>();
-      targets.set(pair[1 - from], (targets.get(pair[1 - from]) ?? 0) + 1);
-      groups.set(pair[from], targets);
-    }
-    let dominant = 0;
-    for (const targets of groups.values()) dominant += Math.max(...targets.values());
-    return dominant / pairs.length;
-  };
-  const translated = Math.min(consistency(0), consistency(1));
+  const translated = translationAgreement(pairs);
   return translated > best ? { score: translated, translated: true } : { score: best, translated: false };
 }
 

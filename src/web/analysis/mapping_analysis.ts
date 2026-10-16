@@ -62,6 +62,16 @@ export function analyzeObservedPairs(
   const total = pairs.length;
   const evidence: ObservedPair[] = [];
 
+  // A pair is suggested when it is the most common partner for its value on
+  // both sides: "G5" → "5" stays suggested even if one employee genuinely
+  // moved grade ("G5" → "6"), which a strict consistency bar would reject.
+  const topByLeft = new Map<string | null, number>();
+  const topByRight = new Map<string | null, number>();
+  for (const item of pairCounts.values()) {
+    topByLeft.set(item.left, Math.max(topByLeft.get(item.left) ?? 0, item.count));
+    topByRight.set(item.right, Math.max(topByRight.get(item.right) ?? 0, item.count));
+  }
+
   for (const item of pairCounts.values()) {
     const lCount = leftCounts.get(item.left) || 1;
     const rCount = rightCounts.get(item.right) || 1;
@@ -74,7 +84,9 @@ export function analyzeObservedPairs(
       item.left !== null &&
       item.right !== null &&
       item.count >= 2 &&
-      consistency >= 0.95;
+      item.count === topByLeft.get(item.left) &&
+      item.count === topByRight.get(item.right) &&
+      consistency >= 0.5;
 
     evidence.push({
       left_value: item.left,
