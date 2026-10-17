@@ -36,13 +36,14 @@
   <header class="appbar">
     <div class="appbar-inner">
       <div class="brand">
+        <span class="brand-mark" aria-hidden="true">Reconcile</span>
         <h1>Reconcile two files</h1>
         <span class="brand-sub">HRIS Reconcile</span>
       </div>
       <div class="appbar-actions">
         <button id="start-over" class="ghost" type="button">Start over</button>
         <div class="menu" id="export-menu">
-          <button id="export-toggle" class="secondary" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="export-panel" disabled title="Compare the files first">Export<span class="caret" aria-hidden="true"></span></button>
+          <button id="export-toggle" class="onyx" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="export-panel" disabled title="Compare the files first">Export<span class="caret" aria-hidden="true"></span></button>
           <div id="export-panel" class="menu-panel" hidden>
             <p class="menu-label">For people</p>
             <button type="button" class="menu-item" data-export="differences.csv"><strong>Differences only</strong><span>CSV for Excel: one line per difference</span></button>
@@ -142,6 +143,7 @@
       <div class="step-content">
         <div id="results-messages" class="messages"></div>
         <p id="verdict" class="verdict"></p>
+        <p id="stat-line" class="stat-line"></p>
         <div id="kpis" class="kpis" role="group" aria-label="Show rows"></div>
         <div id="hints" class="messages"></div>
         <details id="by-column" class="disclosure" open>
@@ -159,7 +161,7 @@
     </section>
   </main>
 
-  <footer class="privacy">Files are processed in your browser and never uploaded. <span id="app-version"></span></footer>
+  <footer class="privacy">Files are processed in this tab and never uploaded or stored. <span id="app-version"></span></footer>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script type="module" src="./main.ts"></script>
 </body>

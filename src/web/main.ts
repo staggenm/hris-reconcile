@@ -872,7 +872,7 @@ function invalidateRun(): void {
   state.run = null;
   state.stale = false;
   state.patterns.clear();
-  for (const id of ["#verdict", "#kpis", "#hints", "#column-summary", "#active-filters", "#row-count", "#results-table", "#pager"]) $(id).replaceChildren();
+  for (const id of ["#verdict", "#stat-line", "#kpis", "#hints", "#column-summary", "#active-filters", "#row-count", "#results-table", "#pager"]) $(id).replaceChildren();
   clearMessages("results");
   updateSteps();
 }
@@ -922,9 +922,28 @@ function renderResults(): void {
     if (rows.duplicate + rows.blank_key) parts.push(`${plural(rows.duplicate + rows.blank_key, "key")} to check`);
     verdict.textContent = `${parts.join(" · ")}.`;
   }
+  renderStatLine();
   renderKpis();
   renderHints(run.dashboard.hints);
   renderColumnSummary();
+}
+
+function renderStatLine(): void {
+  const run = state.run!;
+  const { left, right } = run.dashboard.summary.datasets;
+  const facts: [number, string][] = [
+    [left.record_count, `${left.record_count === 1 ? "row" : "rows"} in ${left.name}`],
+    [right.record_count, `in ${right.name}`],
+    [run.dashboard.fields.length, `${run.dashboard.fields.length === 1 ? "column" : "columns"} compared`],
+  ];
+  const line = $("#stat-line");
+  line.replaceChildren();
+  facts.forEach(([value, label], index) => {
+    if (index > 0) line.append(node("span", "·", "sep"));
+    const fact = node("span");
+    fact.append(node("b", count(value)), ` ${label}`);
+    line.append(fact);
+  });
 }
 
 function renderKpis(): void {

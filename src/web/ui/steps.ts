@@ -1,5 +1,5 @@
 // The page is one screen with three steps. A step is locked until the one
-// before it is complete; locked steps stay visible (dimmed) so the whole
+// before it is complete; locked steps stay visible (muted title and a note) so the whole
 // journey is clear from the start.
 
 export const STEP_IDS = ["load", "settings", "results"] as const;

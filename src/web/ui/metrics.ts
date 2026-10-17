@@ -1,7 +1,8 @@
 import type { RowCounts, RowFilter } from "../analysis/result_rows";
 import { ROW_STATUS } from "./labels";
 
-export type Tone = "ok" | "diff" | "a" | "b" | "warn";
+// Matches stay neutral: colour is for the exceptions.
+export type Tone = "neutral" | "diff" | "a" | "b" | "warn";
 
 // KPI tiles double as the table filters.
 export interface KpiTile {
@@ -14,7 +15,7 @@ export interface KpiTile {
 
 export function kpiTiles(counts: RowCounts, names: { a: string; b: string }): KpiTile[] {
   const tiles: KpiTile[] = [
-    { filter: "match", icon: ROW_STATUS.match.icon, label: "Matched", value: counts.match, tone: "ok" },
+    { filter: "match", icon: ROW_STATUS.match.icon, label: "Matched", value: counts.match, tone: "neutral" },
     { filter: "differs", icon: ROW_STATUS.differs.icon, label: "Differ", value: counts.differs, tone: "diff" },
     { filter: "only_a", icon: "A", label: `Only in ${names.a}`, value: counts.only_a, tone: "a" },
     { filter: "only_b", icon: "B", label: `Only in ${names.b}`, value: counts.only_b, tone: "b" },
