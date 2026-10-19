@@ -7,6 +7,7 @@ export interface Limits {
   maxCells: number;
   maxComparisons: number;
   maxDiscrepancies: number;
+  maxExportBytes: number;
 }
 
 // Limits benchmarked with `npm run bench` (Phase 3, 2026-09-28; Apple M5,
@@ -18,6 +19,10 @@ export interface Limits {
 // capped (8M ≈ 200k × 40) as well as columns. Stored discrepancies are capped
 // at 1.5M (about 5.5× the 5% case at 200k rows): beyond that, the result is
 // almost always a wrong identity field or mapping, not a data finding.
+// Exports are capped at 1 GiB of text: the largest export at 5% differences
+// (raw results CSV, 200k × 30) is about 1 GB, and beyond that browsers may
+// page Blobs to disk or fail the download. No spreadsheet opens a file that
+// large anyway (Excel stops at 1,048,576 rows).
 const BENCHMARKED_LIMITS: Limits = {
   maxFileBytes: 100 * 1024 * 1024,
   maxRows: 200_000,
@@ -25,6 +30,7 @@ const BENCHMARKED_LIMITS: Limits = {
   maxCells: 8_000_000,
   maxComparisons: 6_000_000,
   maxDiscrepancies: 1_500_000,
+  maxExportBytes: 1024 * 1024 * 1024,
 };
 
 export const DEFAULT_LIMITS: Limits = BENCHMARKED_LIMITS;
@@ -76,5 +82,40 @@ export function checkComparisons(leftRows: number, rightRows: number, fields: nu
       "LIMIT_COMPARISONS",
       `this run needs about ${estimate} field comparisons (${Math.min(leftRows, rightRows)} rows × ${fields} fields); the limit is ${limits.maxComparisons}`,
     );
+  }
+}
+
+// Checked while an export is assembled, so an oversized export stops early.
+// `chars` counts UTF-16 code units, which is close to the UTF-8 size for the
+// mostly-ASCII text of an HR export.
+export function checkExportSize(chars: number, limits: Limits = DEFAULT_LIMITS): void {
+  if (chars > limits.maxExportBytes) {
+    throw new AppError("LIMIT_EXPORT_SIZE", `the export is larger than ${megabytes(limits.maxExportBytes)}, the limit for an export`);
+  }
+}
+
+// Saved settings files are small: the app writes a few KB, and a large value
+// mapping a few hundred KB. These caps stop a wrong or malicious file from
+// exhausting memory while it is read, validated and shown in the editor.
+export const CONTRACT_LIMITS = {
+  maxFileBytes: 2 * 1024 * 1024,
+  // One field per compared column, so the column limit applies.
+  maxFields: BENCHMARKED_LIMITS.maxColumns,
+  maxValueMappings: BENCHMARKED_LIMITS.maxColumns,
+  // Values per side for one canonical value, and in all mappings together.
+  maxAliasesPerValue: 1_000,
+  maxAliases: 100_000,
+  // The editor shows one row per (left, right) pair of a canonical value.
+  maxEditorRows: 100_000,
+  // Normalizers per field or identity.
+  maxNormalizers: 20,
+  // Any name, column name, canonical value or alias.
+  maxStringLength: 1_000,
+} as const;
+
+// Pre-flight: runs before a settings file is read.
+export function checkContractFileSize(name: string, bytes: number): void {
+  if (bytes > CONTRACT_LIMITS.maxFileBytes) {
+    throw new AppError("LIMIT_CONTRACT", `settings file '${name}' is ${megabytes(bytes)}; the limit is ${megabytes(CONTRACT_LIMITS.maxFileBytes)}`);
   }
 }

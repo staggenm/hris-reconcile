@@ -27,8 +27,9 @@ self-contained; processing stays in the browser and the application makes no
 network requests. Uploaded data remains in the browser tab and is only written
 to disk if a user downloads an export.
 
-Treat downloaded reports and source files according to the sensitivity of the
-data they contain.
+Exports contain employee data. Store and share them, like the source files,
+only in locations your organisation has approved for this data; the Export
+menu, the download message and the printable report all say so.
 
 ## Security and privacy
 
@@ -44,8 +45,19 @@ What the file guarantees:
   "Start over" or closing the tab discards everything. Files reach the disk
   only when the operator downloads an export or saved settings.
 - **No injection.** File contents are only ever displayed as text; exported
-  CSVs neutralize spreadsheet formulas by default; the HTML report contains
-  no scripts and has its own blocking policy.
+  CSVs always neutralize spreadsheet formulas (there is no option to turn
+  this off); the HTML report contains no scripts and has its own blocking
+  policy.
+- **Bounded input and output.** Data files are capped by size, rows, columns,
+  cells, comparisons and stored differences (`src/web/core/limits.ts`). A
+  saved settings file is capped at 2 MB, 200 fields and value mappings, 1,000
+  values per side of a translation, 100,000 values and 100,000 translation
+  rows in total, 20 normalizers per field and 1,000 characters per string.
+  An export stops with a clear message above 1 GiB.
+- **Worker from a Blob URL only.** The processing worker starts from a Blob
+  URL, the only kind the policy allows. The build removes Vite's `data:` URL
+  fallback (and fails if it reappears); a browser that blocks Blob workers
+  gets a clear "not supported" message.
 
 What the operator's environment must provide, because no web page can
 control it:

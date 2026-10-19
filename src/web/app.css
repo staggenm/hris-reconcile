@@ -144,7 +144,8 @@ button.link:disabled { background: none; text-decoration: none; }
 .menu-item strong { font-weight: 500; }
 .menu-item span { color: var(--text-subtle); font-size: var(--fs-xs); font-weight: 400; }
 .menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); }
-.menu-check { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s2); padding: var(--s2); border-top: 1px solid var(--border); color: var(--text-subtle); font-size: var(--fs-xs); }
+.menu-note { margin: var(--s2) 0 0; padding: var(--s2); border-top: 1px solid var(--border); color: var(--text-subtle); font-size: var(--fs-xs); line-height: 1.4; }
+.menu-note strong { color: var(--text); }
 
 /* ---------- Layout and steps ---------- */
 main { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s5); max-width: 1280px; margin: 0 auto; padding: var(--s5); }

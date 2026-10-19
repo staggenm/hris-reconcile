@@ -1,5 +1,5 @@
 import { AppError, serializeError } from "./core/errors";
-import { checkFileSize } from "./core/limits";
+import { checkContractFileSize, checkFileSize } from "./core/limits";
 import { ReconciliationEngine } from "./core/reconciliation";
 import { Dataset, DatasetSummary, IdentityNormalizerName, ReconciliationContract } from "./core/types";
 import { CsvEncoding, parseCsvContent } from "./analysis/csv";
@@ -53,7 +53,6 @@ interface ResultRequest extends BaseRequest {
   page?: number;
   pageSize?: number;
   format?: ExportFormat;
-  excelSafe?: boolean;
   resultId?: number;
 }
 
@@ -151,6 +150,8 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
       } else if (request.type === "serialize-contract") {
         payload = `${JSON.stringify(serializeContract(request.contract!), null, 2)}\n`;
       } else {
+        // The main thread checks the file size before reading; this guards the worker itself.
+        checkContractFileSize(request.fileName ?? "settings", (request.text ?? "").length);
         let input: unknown;
         try {
           input = JSON.parse(request.text ?? "");
@@ -223,21 +224,19 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
     }
     if (request.type === "export") {
       // Chunks → Blob; posting a Blob shares it by reference instead of copying a string.
-      const excelSafe = request.excelSafe ?? true;
       const metadata = () => buildReportMetadata({
         sources: { left: getSource(request.sessionGeneration, "left"), right: getSource(request.sessionGeneration, "right") },
-        excelSafe,
       });
       const csv = "text/csv;charset=utf-8";
       let blob: Blob;
       switch (request.format) {
-        case "differences.csv": blob = exportBlob(differencesCsvChunks(latestIndex, { excelSafe }), csv); break;
-        case "comparison.csv": blob = exportBlob(comparisonCsvChunks(latestIndex, { excelSafe }), csv); break;
+        case "differences.csv": blob = exportBlob(differencesCsvChunks(latestIndex), csv); break;
+        case "comparison.csv": blob = exportBlob(comparisonCsvChunks(latestIndex), csv); break;
         case "report.html": blob = exportBlob(htmlReportChunks(latestIndex, metadata()), "text/html;charset=utf-8"); break;
         case "summary.txt": blob = new Blob([summaryText(latestIndex, metadata())], { type: "text/plain;charset=utf-8" }); break;
         case "report.json": blob = exportBlob(jsonChunks(latestContract, latestResult, metadata()), "application/json;charset=utf-8"); break;
         case "full.csv":
-        case "mismatches.csv": blob = exportBlob(csvChunks(latestResult, { mismatchesOnly: request.format === "mismatches.csv", excelSafe }), csv); break;
+        case "mismatches.csv": blob = exportBlob(csvChunks(latestResult, { mismatchesOnly: request.format === "mismatches.csv" }), csv); break;
         default: throw new AppError("WORKER_PROTOCOL", "unknown export format");
       }
       self.postMessage({ type: "export-result", requestId: request.requestId, sessionGeneration: request.sessionGeneration, payload: blob });

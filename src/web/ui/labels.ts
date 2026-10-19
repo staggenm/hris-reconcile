@@ -110,10 +110,13 @@ export const FRIENDLY_ERRORS: Partial<Record<ErrorCode, string>> = {
   LIMIT_CELLS: "This file is too large to compare in the browser. Remove columns you don't need and try again.",
   LIMIT_COMPARISONS: "Too many values to compare at once. Compare fewer columns.",
   LIMIT_DISCREPANCIES: "Almost everything differs. The key columns are probably wrong; check “Match rows on”.",
+  LIMIT_EXPORT_SIZE: "This export is too large to create in the browser. Choose “Differences only” instead.",
+  LIMIT_CONTRACT: "This saved settings file is too large or has too many entries. Check that it is the right file.",
   CONTRACT_INVALID: "The match settings aren't complete yet.",
   COLUMNS_MISSING: "The saved settings expect columns these files don't have.",
   MAPPING_CONFLICT: "Two translations disagree about the same value. Untick one of them.",
   MAPPING_AMBIGUOUS: "Two translations disagree about the same value. Untick one of them.",
   MAPPING_INCOMPLETE: "A translation is missing a value. Fill in both sides or untick it.",
   WORKER_CRASHED: "The browser ran out of memory and the session was reset. Try smaller files or fewer columns.",
+  WORKER_UNSUPPORTED: "This browser blocks the background processing this tool needs. Use a current Chrome, Edge or Firefox, or ask IT whether a policy blocks it.",
 };

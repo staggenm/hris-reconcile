@@ -6,7 +6,7 @@ import {
 } from "./types";
 import type { CsvEncoding } from "../analysis/csv";
 import { contractSha256, serializeContract } from "./contract_document";
-import { DEFAULT_LIMITS, Limits } from "./limits";
+import { checkExportSize, DEFAULT_LIMITS, Limits } from "./limits";
 import { FIELD_STATUSES, IDENTITY_PUBLIC } from "./status";
 import { APP_VERSION } from "./version";
 
@@ -49,11 +49,13 @@ export function excelSafeCell(value: string): string {
   return FORMULA_TRIGGER.test(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
 }
 
-export function escapeCsvCell(value: string | null | undefined, excelSafe = false): string {
+// Every exported CSV cell goes through here, so formula neutralization is
+// always on; there is deliberately no option to turn it off.
+export function escapeCsvCell(value: string | null | undefined): string {
   if (value === null || value === undefined) {
     return "";
   }
-  const str = excelSafe ? excelSafeCell(String(value)) : String(value);
+  const str = excelSafeCell(String(value));
   if (
     str.includes(",") ||
     str.includes('"') ||
@@ -89,11 +91,14 @@ export function* batched(pieces: Iterable<string>): Generator<string> {
 // holds the whole export.
 export const BLOB_FOLD_CHARS = 8 * 1024 * 1024;
 
-export function exportBlob(chunks: Iterable<string>, type: string): Blob {
+export function exportBlob(chunks: Iterable<string>, type: string, limits: Limits = DEFAULT_LIMITS): Blob {
   let blob = new Blob([], { type });
   let pending: string[] = [];
   let size = 0;
+  let total = 0;
   for (const chunk of chunks) {
+    total += chunk.length;
+    checkExportSize(total, limits);
     pending.push(chunk);
     size += chunk.length;
     if (size >= BLOB_FOLD_CHARS) {
@@ -108,9 +113,8 @@ export function exportBlob(chunks: Iterable<string>, type: string): Blob {
 function* csvLines(
   result: ReconciliationResult,
   mismatchesOnly: boolean,
-  excelSafe: boolean,
 ): Generator<string> {
-  const cell = (value: string | null | undefined) => escapeCsvCell(value, excelSafe);
+  const cell = escapeCsvCell;
   yield `${CSV_COLUMNS.join(",")}\n`;
 
   for (const identity of result.identityResults) {
@@ -159,9 +163,9 @@ function* csvLines(
 
 export function csvChunks(
   result: ReconciliationResult,
-  options: { mismatchesOnly?: boolean; excelSafe?: boolean } = {},
+  options: { mismatchesOnly?: boolean } = {},
 ): Generator<string> {
-  return batched(csvLines(result, options.mismatchesOnly ?? false, options.excelSafe ?? true));
+  return batched(csvLines(result, options.mismatchesOnly ?? false));
 }
 
 export const REPORT_FORMAT_VERSION = "2.0";
@@ -177,21 +181,18 @@ export interface SourceInfo {
 export interface ReportMetadata {
   appVersion: string;
   generatedAt: string;
-  excelSafe: boolean;
   limits: Limits;
   sources: { left: SourceInfo; right: SourceInfo };
 }
 
 export function buildReportMetadata(options: {
   sources: { left: SourceInfo; right: SourceInfo };
-  excelSafe: boolean;
   limits?: Limits;
   now?: Date;
 }): ReportMetadata {
   return {
     appVersion: APP_VERSION,
     generatedAt: (options.now ?? new Date()).toISOString(),
-    excelSafe: options.excelSafe,
     limits: options.limits ?? DEFAULT_LIMITS,
     sources: options.sources,
   };
@@ -315,7 +316,8 @@ export function jsonChunks(
       generated_at: metadata.generatedAt,
       contract_sha256: contractSha256(contract),
       processing_mode: "browser",
-      excel_safe: metadata.excelSafe,
+      // Always true since formula protection became mandatory; kept for readers of format 2.0.
+      excel_safe: true,
       limits: {
         max_file_bytes: metadata.limits.maxFileBytes,
         max_rows: metadata.limits.maxRows,
@@ -323,6 +325,7 @@ export function jsonChunks(
         max_cells: metadata.limits.maxCells,
         max_comparisons: metadata.limits.maxComparisons,
         max_discrepancies: metadata.limits.maxDiscrepancies,
+        max_export_bytes: metadata.limits.maxExportBytes,
       },
     },
     sources: { left: source("left"), right: source("right") },

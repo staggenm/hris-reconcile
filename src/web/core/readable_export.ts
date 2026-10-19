@@ -60,11 +60,10 @@ function rowNote(status: RowStatus, side: "a" | "b" | null, leftLines: number[],
 }
 
 // One line per difference: a field that differs, or a key found in one file only.
-export function differencesCsvChunks(index: ResultIndex, options: { excelSafe: boolean }): Generator<string> {
+export function differencesCsvChunks(index: ResultIndex): Generator<string> {
   const names = namesOf(index.contract);
   const fields = new Map(index.contract.fields.map((field) => [field.name, field]));
-  const cell = (value: string | null | undefined) => escapeCsvCell(value, options.excelSafe);
-  const line = (values: Array<string | null | undefined>) => `${values.map(cell).join(",")}\r\n`;
+  const line = (values: Array<string | null | undefined>) => `${values.map(escapeCsvCell).join(",")}\r\n`;
   return batched((function* () {
     yield BOM + line(["Result", names.key, "Column", `Value in ${names.a}`, `Value in ${names.b}`, "Difference (B − A)", `Row in ${names.a}`, `Row in ${names.b}`]);
     const identities = index.result.identityResults;
@@ -97,11 +96,10 @@ export function differencesCsvChunks(index: ResultIndex, options: { excelSafe: b
 }
 
 // One line per key, with every compared column side by side.
-export function comparisonCsvChunks(index: ResultIndex, options: { excelSafe: boolean }): Generator<string> {
+export function comparisonCsvChunks(index: ResultIndex): Generator<string> {
   const names = namesOf(index.contract);
   const fields = index.contract.fields;
-  const cell = (value: string | null | undefined) => escapeCsvCell(value, options.excelSafe);
-  const line = (values: Array<string | null | undefined>) => `${values.map(cell).join(",")}\r\n`;
+  const line = (values: Array<string | null | undefined>) => `${values.map(escapeCsvCell).join(",")}\r\n`;
   return batched((function* () {
     const header = ["Result", names.key, `Row in ${names.a}`, `Row in ${names.b}`];
     for (const field of fields) header.push(`${field.left} (${names.a})`, `${field.right} (${names.b})`, `${field.left}: check`);
@@ -296,7 +294,7 @@ export function htmlReportChunks(index: ResultIndex, metadata: ReportMetadata): 
       yield `<tr><td><span class="badge s-only_${side === "left" ? "a" : "b"}">${label}</span></td><td>${e(stats.name)}<br><span class="note">${e(source.fileName)} · ${e(source.encoding)}</span></td><td class="num">${count(stats.recordCount)}</td><td class="num">${count(stats.columnCount)}</td><td class="mono note">${e(source.sha256)}</td></tr>`;
     }
     yield `</tbody></table>`;
-    yield `<footer>Created with HRIS Reconcile ${e(metadata.appVersion)} in the browser; the files were not uploaded anywhere. Settings fingerprint ${e(contractSha256(contract).slice(0, 16))}. Treat this report according to the sensitivity of the data it contains.</footer>`;
+    yield `<footer>Created with HRIS Reconcile ${e(metadata.appVersion)} in the browser; the files were not uploaded anywhere. Settings fingerprint ${e(contractSha256(contract).slice(0, 16))}. This report contains employee data: store and share it only in locations your organisation has approved for this data.</footer>`;
     yield `</main></body></html>\n`;
   })());
 }

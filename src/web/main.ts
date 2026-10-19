@@ -1,5 +1,5 @@
 import { AppError, errorCodeOf } from "./core/errors";
-import { checkFileSize } from "./core/limits";
+import { checkContractFileSize, checkFileSize } from "./core/limits";
 import { APP_VERSION } from "./core/version";
 // Type-only imports from analysis/ and core/ modules keep their code (the
 // normalizers, the casefold table, contract parsing) in the worker bundle.
@@ -195,12 +195,12 @@ function showError(error: unknown, area: Area = currentArea()): void {
   $(`#${area}-messages`).scrollIntoView({ block: "nearest" });
 }
 
-function toast(text: string): void {
+function toast(text: string, milliseconds = 4000): void {
   const element = $("#toast");
   element.textContent = text;
   element.hidden = false;
   window.clearTimeout(Number(element.dataset.timer));
-  element.dataset.timer = String(window.setTimeout(() => { element.hidden = true; }, 4000));
+  element.dataset.timer = String(window.setTimeout(() => { element.hidden = true; }, milliseconds));
 }
 
 // ---------- Step 1: load files ----------
@@ -1222,17 +1222,19 @@ const EXPORT_FILES: Record<ExportFormat, string> = {
   "mismatches.csv": "raw_differences.csv",
 };
 
+// Exports contain employee data; the same reminder is shown in the Export menu.
+const EXPORT_HANDLING = "It contains employee data: store and share it only in locations your organisation has approved for this data.";
+
 async function exportBlob(format: ExportFormat): Promise<Blob> {
   if (!state.run) throw new AppError("SESSION_STATE", "compare the files first");
-  const excelSafe = ($("#excel-safe") as HTMLInputElement).checked;
-  return queryWorker<Blob>("export", { format, resultId: state.run.dashboard.resultId, excelSafe }, session);
+  return queryWorker<Blob>("export", { format, resultId: state.run.dashboard.resultId }, session);
 }
 
 async function download(format: ExportFormat): Promise<void> {
   const blob = await exportBlob(format);
   const name = `${state.run!.contract.name}_${EXPORT_FILES[format]}`;
   saveBlob(blob, name);
-  toast(`Downloaded ${name}${state.stale ? " (from the results before your latest settings change)" : ""}`);
+  toast(`Downloaded ${name}${state.stale ? " (from the results before your latest settings change)" : ""}. ${EXPORT_HANDLING}`, 10000);
 }
 
 async function copySummary(): Promise<void> {
@@ -1311,6 +1313,7 @@ async function saveSettings(): Promise<void> {
 async function loadSettings(file: File): Promise<void> {
   if (!state.files.left || !state.files.right) throw new AppError("SESSION_STATE", "load both files before loading saved settings");
   clearMessages("settings");
+  checkContractFileSize(file.name, file.size);
   const imported = await queryWorker<ImportedContract>("import-contract", { text: await file.text(), fileName: file.name }, session);
   setupGeneration++;
   invalidateRun();
@@ -1398,7 +1401,6 @@ function startOver(): void {
   state.key = { left: "", right: "", normalize: [] };
   for (const input of keyOptionInputs()) input.checked = false;
   ($("#key-options") as HTMLDetailsElement).open = false;
-  ($("#excel-safe") as HTMLInputElement).checked = true;
   ($("#search") as HTMLInputElement).value = "";
   renderFile("left");
   renderFile("right");

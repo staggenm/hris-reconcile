@@ -12,8 +12,8 @@ const SCRIPT_HASHES = "__CSP_SCRIPT_HASHES__";
 const STYLE_HASHES = "__CSP_STYLE_HASHES__";
 
 // Production policy. Script and style hashes are filled in after inlining.
-// worker-src is blob: only: Vite's ?worker&inline wrapper falls back to a
-// data: URL when Blob URLs fail, and that fallback is inert under this policy.
+// worker-src is blob: only; noDataWorkerFallback() removes Vite's data: URL
+// fallback, so a blocked Blob worker is reported instead of silently retried.
 const PRODUCTION_CSP = [
   "default-src 'none'",
   `script-src ${SCRIPT_HASHES}`,
@@ -28,6 +28,25 @@ const PRODUCTION_CSP = [
 ].join("; ") + ";";
 
 const DEVELOPMENT_CSP = "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' ws://localhost:* http://localhost:* ws://127.0.0.1:* http://127.0.0.1:*; img-src data:; worker-src 'self' blob:; child-src 'none'; frame-src 'none';";
+
+// Vite's ?worker&inline wrapper retries with a data: URL when the Blob URL
+// worker cannot be created. The CSP never allows data: workers, so the retry
+// can only fail; replace it with an error the UI reports as WORKER_UNSUPPORTED.
+const DATA_WORKER_FALLBACK = /catch\s*\(e\)\s*\{\s*return new Worker\(\s*'data:text\/javascript;charset=utf-8,'\s*\+\s*encodeURIComponent\(jsContent\),[^)]*\);\s*\}/;
+const WORKER_UNSUPPORTED_SIGNAL = "WORKER_UNSUPPORTED";
+
+function noDataWorkerFallback(): Plugin {
+  return {
+    name: "no-data-worker-fallback",
+    apply: "build",
+    enforce: "post",
+    transform(code, id) {
+      if (!/[?&]worker&inline\b/.test(id)) return;
+      if (!DATA_WORKER_FALLBACK.test(code)) throw new Error(`worker: Vite's data: URL fallback not found in ${id}; review the wrapper`);
+      return { code: code.replace(DATA_WORKER_FALLBACK, `catch(e) { throw new Error(${JSON.stringify(WORKER_UNSUPPORTED_SIGNAL)}); }`), map: null };
+    },
+  };
+}
 
 function hashBlocks(html: string, tag: "script" | "style"): string {
   const hashes = new Set<string>();
@@ -70,6 +89,7 @@ function cspHashes(): Plugin {
       for (const asset of Object.values(bundle)) {
         if (asset.type !== "asset" || !asset.fileName.endsWith(".html")) continue;
         const html = String(asset.source);
+        if (html.includes("data:text/javascript")) throw new Error(`worker: ${asset.fileName} still contains a data: URL script`);
         if (!html.includes(SCRIPT_HASHES) || !html.includes(STYLE_HASHES)) {
           throw new Error(`CSP: hash placeholders missing in ${asset.fileName}`);
         }
@@ -84,7 +104,7 @@ function cspHashes(): Plugin {
 
 export default defineConfig({
   root: "src/web",
-  plugins: [entryCsp(), viteSingleFile(), cspHashes()],
+  plugins: [entryCsp(), noDataWorkerFallback(), viteSingleFile(), cspHashes()],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
   },

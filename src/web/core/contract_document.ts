@@ -3,6 +3,7 @@ import { compareCodePoints } from "./compare";
 import { NORMALIZED_TEXT_CHAIN } from "./contract_builder";
 import { AppError } from "./errors";
 import { validateIdentityNormalizers } from "./identity";
+import { CONTRACT_LIMITS } from "./limits";
 import { validateMapping } from "./mapping";
 import { NORMALIZERS } from "./normalization";
 import { sha256HexSync } from "./sha256";
@@ -88,16 +89,40 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 
+const tooLarge = (message: string) => new AppError("LIMIT_CONTRACT", `contract document: ${message}`);
+function checkCount(count: number, limit: number, what: string): void {
+  if (count > limit) throw tooLarge(`${what} has ${count} entries; the limit is ${limit}`);
+}
+function checkLength(value: string, what: string): void {
+  if (value.length > CONTRACT_LIMITS.maxStringLength) {
+    throw tooLarge(`${what} is ${value.length} characters long; the limit is ${CONTRACT_LIMITS.maxStringLength}`);
+  }
+}
+
 function parseMappings(value: unknown): Record<string, MappingConfig> {
   if (!isObject(value)) throw invalid("contract document: 'value_mappings' must be an object");
   const mappings = Object.create(null) as Record<string, MappingConfig>;
-  for (const [name, entries] of Object.entries(value)) {
+  const names = Object.keys(value);
+  checkCount(names.length, CONTRACT_LIMITS.maxValueMappings, "'value_mappings'");
+  let aliases = 0;
+  let editorRows = 0;
+  for (const name of names) {
+    const entries = value[name];
+    checkLength(name, "a value mapping name");
     if (!isObject(entries)) throw invalid(`contract document: value mapping '${name}' must be an object`);
     const mapping = Object.create(null) as MappingConfig;
     for (const [canonical, sides] of Object.entries(entries)) {
+      checkLength(canonical, `a canonical value in '${name}'`);
       if (!isObject(sides) || !isStringArray(sides.left) || !isStringArray(sides.right) || !sides.left.length || !sides.right.length) {
         throw invalid(`contract document: value mapping '${name}' entry '${canonical}' needs non-empty 'left' and 'right' string lists`);
       }
+      checkCount(sides.left.length, CONTRACT_LIMITS.maxAliasesPerValue, `value mapping '${name}' entry '${canonical}' (left)`);
+      checkCount(sides.right.length, CONTRACT_LIMITS.maxAliasesPerValue, `value mapping '${name}' entry '${canonical}' (right)`);
+      aliases += sides.left.length + sides.right.length;
+      editorRows += sides.left.length * sides.right.length;
+      checkCount(aliases, CONTRACT_LIMITS.maxAliases, "the value mappings together");
+      checkCount(editorRows, CONTRACT_LIMITS.maxEditorRows, "the value mappings' translation rows");
+      for (const alias of [...sides.left, ...sides.right]) checkLength(alias, `a value in '${name}' entry '${canonical}'`);
       mapping[canonical] = { left: [...sides.left], right: [...sides.right] };
     }
     mappings[name] = mapping;
@@ -118,20 +143,26 @@ export function parseContractDocument(input: unknown): ReconciliationContract {
   }
   const identityNormalize = identity.normalize ?? [];
   if (!isStringArray(identityNormalize)) throw invalid("contract document: 'identity.normalize' must be a list of names");
+  checkCount(identityNormalize.length, CONTRACT_LIMITS.maxNormalizers, "'identity.normalize'");
   validateIdentityNormalizers(identityNormalize);
   if (typeof input.name !== "string" || !isObject(input.left) || typeof input.left.name !== "string"
     || !isObject(input.right) || typeof input.right.name !== "string") {
     throw invalid("contract document: 'name', 'left.name' and 'right.name' are required");
   }
+  for (const [value, what] of [[input.name, "'name'"], [input.left.name, "'left.name'"], [input.right.name, "'right.name'"],
+    [identity.left, "'identity.left'"], [identity.right, "'identity.right'"]] as const) checkLength(value, what);
   if (!Array.isArray(input.fields) || input.fields.length === 0) throw invalid("contract document: 'fields' must be a non-empty list");
+  checkCount(input.fields.length, CONTRACT_LIMITS.maxFields, "'fields'");
   const valueMappings = parseMappings(input.value_mappings ?? {});
 
   const fields: FieldConfig[] = input.fields.map((raw, index) => {
     if (!isObject(raw) || typeof raw.name !== "string" || typeof raw.left !== "string" || typeof raw.right !== "string") {
       throw invalid(`contract document: field ${index + 1} needs string 'name', 'left' and 'right'`);
     }
+    for (const key of ["name", "left", "right"] as const) checkLength(raw[key] as string, `field ${index + 1} '${key}'`);
     const normalize = raw.normalize ?? [];
     if (!isStringArray(normalize)) throw invalid(`contract document: field '${raw.name}' 'normalize' must be a list of names`);
+    checkCount(normalize.length, CONTRACT_LIMITS.maxNormalizers, `field '${raw.name}' 'normalize'`);
     for (const name of normalize) NORMALIZERS.resolve(name);
     const valueMapping = raw.value_mapping ?? null;
     if (valueMapping !== null && typeof valueMapping !== "string") throw invalid(`contract document: field '${raw.name}' 'value_mapping' must be a name or null`);

@@ -31,6 +31,7 @@ export interface WorkerPage<T> {
 }
 
 export const WORKER_CRASHED_MESSAGE = "Processing stopped (likely memory). Session reset.";
+export const WORKER_UNSUPPORTED_MESSAGE = "the browser could not start the processing worker (Blob URL workers are blocked or unsupported)";
 
 let worker: Worker | null = null;
 let crashListener: ((error: AppError) => void) | null = null;
@@ -60,7 +61,13 @@ function failPending(error: Error): void {
 
 function getWorker(): Worker {
   if (worker) return worker;
-  const instance = new ReconciliationWorker();
+  let instance: Worker;
+  try {
+    // Only a Blob URL worker is attempted; the build removes Vite's data: URL fallback.
+    instance = new ReconciliationWorker();
+  } catch {
+    throw new AppError("WORKER_UNSUPPORTED", WORKER_UNSUPPORTED_MESSAGE);
+  }
   instance.addEventListener("message", (event: MessageEvent) => {
     const message = event.data as {
       type: string;
@@ -98,7 +105,12 @@ function getWorker(): Worker {
 }
 
 function requestWorker<T>(type: string, options: Record<string, unknown>, sessionGeneration: number, transfer: Transferable[] = []): Promise<T> {
-  const instance = getWorker();
+  let instance: Worker;
+  try {
+    instance = getWorker();
+  } catch (error) {
+    return Promise.reject(error);
+  }
   const requestId = nextRequestId++;
   return new Promise((resolve, reject) => {
     pending.set(requestId, {
