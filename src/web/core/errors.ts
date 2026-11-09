@@ -15,6 +15,7 @@ export const ERROR_CATALOGUE = {
   LIMIT_COMPARISONS: "The run would perform more field comparisons than the configured limit.",
   LIMIT_DISCREPANCIES: "The run found more differences than the limit; the configuration is probably wrong.",
   LIMIT_EXPORT_SIZE: "The export would be larger than the configured size limit.",
+  EXPORT_WRITE_FAILED: "The export could not be written to the selected location. Try again or choose another location.",
   LIMIT_CONTRACT: "The saved settings file exceeds a size limit.",
   CONTRACT_INVALID: "The wizard configuration is incomplete or inconsistent.",
   COLUMNS_MISSING: "A dataset lacks a column the contract requires.",

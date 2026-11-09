@@ -111,6 +111,7 @@ export const FRIENDLY_ERRORS: Partial<Record<ErrorCode, string>> = {
   LIMIT_COMPARISONS: "Too many values to compare at once. Compare fewer columns.",
   LIMIT_DISCREPANCIES: "Almost everything differs. The key columns are probably wrong; check “Match rows on”.",
   LIMIT_EXPORT_SIZE: "This export is too large to create in the browser. Choose “Differences only” instead.",
+  EXPORT_WRITE_FAILED: "The export could not be saved. Try again or choose another location.",
   LIMIT_CONTRACT: "This saved settings file is too large or has too many entries. Check that it is the right file.",
   CONTRACT_INVALID: "The match settings aren't complete yet.",
   COLUMNS_MISSING: "The saved settings expect columns these files don't have.",

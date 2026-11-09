@@ -27,9 +27,10 @@ self-contained; processing stays in the browser and the application makes no
 network requests. Uploaded data remains in the browser tab and is only written
 to disk if a user downloads an export.
 
-Exports contain employee data. Store and share them, like the source files,
-only in locations your organisation has approved for this data; the Export
-menu, the download message and the printable report all say so.
+Each export can contain sensitive employee data. Store it only in an approved
+location, share it only through approved channels, and delete it as soon as it
+is no longer needed for its intended purpose. Saved settings can also contain
+values from employee data; apply the same handling and deletion rule to them.
 
 ## Security and privacy
 
@@ -81,6 +82,9 @@ Requires Node.js 24.21.0 and npm.
 npm ci
 npm run build
 ```
+
+To run the full verification suite, install the Playwright browsers once with
+`npx playwright install chromium firefox webkit`, then run `npm run verify`.
 
 The build writes `dist/hris-reconcile.html`. For local development, run
 `npm run dev` and open the local address printed by Vite. The app source and

@@ -23,6 +23,7 @@ import { LOCKED_NOTES, STEP_IDS, StepId, stepStates } from "./ui/steps";
 import { loadRemembered, pairKey, RememberedSettings, saveRemembered } from "./ui/storage";
 import { $, button, node, selectOf } from "./ui/dom";
 import { count, FRIENDLY_ERRORS, IDENTITY_OPTION_LABELS, MODE_CHOICES, modeAction, modeChoice, percent, plural, ROW_STATUS } from "./ui/labels";
+import { revokePendingDownloads, saveBlob as saveExportBlob } from "./ui/save_file";
 import { onBusyChange, onWorkerCrash, parseAndProfileInWorker, queryWorker, reconcileInWorker, ReconciliationDashboard, terminateReconciliationWorker, WorkerPage } from "./worker_client";
 
 type Side = "left" | "right";
@@ -98,8 +99,6 @@ let runGeneration = 0;
 let rowsGeneration = 0;
 let nextColumnId = 1;
 const uploadGeneration: Record<Side, number> = { left: 0, right: 0 };
-const downloadUrls = new Set<string>();
-
 const sideName = (side: Side) => (side === "left" ? "A" : "B");
 const fileName = (side: Side) => state.files[side]?.summary.name ?? `File ${sideName(side)}`;
 const names = () => ({ a: fileName("left"), b: fileName("right") });
@@ -135,6 +134,7 @@ interface MessageOptions {
   actions?: HTMLElement[];
   dismissible?: boolean;
   id?: string;
+  context?: string;
 }
 
 const MESSAGE_ICONS = { info: "i", ok: "✓", warn: "!", error: "✕", accent: "→" } as const;
@@ -144,9 +144,11 @@ function messageElement(options: MessageOptions): HTMLDivElement {
   element.dataset.tone = options.tone;
   if (options.id) element.dataset.id = options.id;
   element.setAttribute("role", options.tone === "error" ? "alert" : "status");
+  if (options.tone === "error") element.setAttribute("aria-live", "assertive");
   const body = node("div", "", "message-body");
   body.append(node("p", options.title));
   if (options.detail) body.append(node("p", options.detail, "message-detail"));
+  if (options.context) body.append(node("p", options.context, "message-context"));
   if (options.actions?.length) {
     const actions = node("div", "", "message-actions");
     actions.append(...options.actions);
@@ -193,14 +195,6 @@ function showError(error: unknown, area: Area = currentArea()): void {
   });
   if (unexpected) console.error(error);
   $(`#${area}-messages`).scrollIntoView({ block: "nearest" });
-}
-
-function toast(text: string, milliseconds = 4000): void {
-  const element = $("#toast");
-  element.textContent = text;
-  element.hidden = false;
-  window.clearTimeout(Number(element.dataset.timer));
-  element.dataset.timer = String(window.setTimeout(() => { element.hidden = true; }, milliseconds));
 }
 
 // ---------- Step 1: load files ----------
@@ -1222,8 +1216,21 @@ const EXPORT_FILES: Record<ExportFormat, string> = {
   "mismatches.csv": "raw_differences.csv",
 };
 
-// Exports contain employee data; the same reminder is shown in the Export menu.
-const EXPORT_HANDLING = "It contains employee data: store and share it only in locations your organisation has approved for this data.";
+const EXPORT_WARNING = {
+  title: "This export contains sensitive employee data",
+  body: "Store it only in an approved location, share it only through approved channels, and delete it as soon as it is no longer needed for its intended purpose.",
+} as const;
+
+function showExportWarning(area: Area, context: string): void {
+  showMessage(area, {
+    tone: "error",
+    title: EXPORT_WARNING.title,
+    detail: EXPORT_WARNING.body,
+    context,
+    dismissible: true,
+    id: "export-warning",
+  });
+}
 
 async function exportBlob(format: ExportFormat): Promise<Blob> {
   if (!state.run) throw new AppError("SESSION_STATE", "compare the files first");
@@ -1233,8 +1240,9 @@ async function exportBlob(format: ExportFormat): Promise<Blob> {
 async function download(format: ExportFormat): Promise<void> {
   const blob = await exportBlob(format);
   const name = `${state.run!.contract.name}_${EXPORT_FILES[format]}`;
-  saveBlob(blob, name);
-  toast(`Downloaded ${name}${state.stale ? " (from the results before your latest settings change)" : ""}. ${EXPORT_HANDLING}`, 10000);
+  const result = await saveExportBlob(blob, name);
+  if (result === "cancelled") return;
+  showExportWarning("results", `${name}${state.stale ? " (from the results before your latest settings change)" : ""}`);
 }
 
 async function copySummary(): Promise<void> {
@@ -1254,20 +1262,7 @@ async function copySummary(): Promise<void> {
     area.remove();
     if (!copied) throw new AppError("UNKNOWN", "the browser blocked copying; use the printable report instead");
   }
-  toast("Summary copied to the clipboard");
-}
-
-function saveBlob(blob: Blob, filename: string): void {
-  const anchor = document.createElement("a");
-  anchor.href = URL.createObjectURL(blob);
-  const objectUrl = anchor.href;
-  downloadUrls.add(objectUrl);
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => {
-    URL.revokeObjectURL(objectUrl);
-    downloadUrls.delete(objectUrl);
-  }, 30000);
+  showExportWarning("results", "Summary copied to the clipboard");
 }
 
 function setupExportMenu(): void {
@@ -1306,8 +1301,9 @@ async function saveSettings(): Promise<void> {
   const contract = state.imported ? state.imported.contract : await buildContract();
   const text = await queryWorker<string>("serialize-contract", { contract }, session);
   const name = `${contract.name}.settings.json`;
-  saveBlob(new Blob([text], { type: "application/json;charset=utf-8" }), name);
-  toast(`Saved ${name}. Load it next time to reuse these settings.`);
+  const result = await saveExportBlob(new Blob([text], { type: "application/json;charset=utf-8" }), name);
+  if (result === "cancelled") return;
+  showExportWarning("settings", `Saved settings: ${name}`);
 }
 
 async function loadSettings(file: File): Promise<void> {
@@ -1394,8 +1390,7 @@ function startOver(): void {
   terminateReconciliationWorker();
   uploadGeneration.left++;
   uploadGeneration.right++;
-  for (const url of downloadUrls) URL.revokeObjectURL(url);
-  downloadUrls.clear();
+  revokePendingDownloads();
   state.files = { left: null, right: null };
   resetSettings();
   state.key = { left: "", right: "", normalize: [] };
